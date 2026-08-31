@@ -1,0 +1,1 @@
+import {ApplicationPreparePage} from '@/components/features/application-pages';export default async function Page({params}:{params:Promise<{jobId:string}>}){const {jobId}=await params;return <ApplicationPreparePage jobId={jobId}/>}

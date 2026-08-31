@@ -1,0 +1,1 @@
+import {DocumentEditorPage} from '@/components/features/document-pages';export default async function Page({params}:{params:Promise<{documentId:string}>}){const {documentId}=await params;return <DocumentEditorPage documentId={documentId}/>}

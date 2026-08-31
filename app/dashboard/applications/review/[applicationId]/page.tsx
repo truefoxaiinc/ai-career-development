@@ -1,0 +1,1 @@
+import {ApplicationReviewPage} from '@/components/features/application-pages';export default async function Page({params}:{params:Promise<{applicationId:string}>}){const {applicationId}=await params;return <ApplicationReviewPage applicationId={applicationId}/>}

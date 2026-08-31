@@ -1,0 +1,1 @@
+import {ResumeProgress} from '@/components/features/onboarding';export default async function Page({params}:{params:Promise<{taskId:string}>}){const {taskId}=await params;return <ResumeProgress taskId={taskId}/>}
