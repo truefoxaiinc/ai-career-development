@@ -4,3 +4,16 @@ out
 .DS_Store
 *.log
 .env*
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+.careerpilot-storage/
+.storage/
+.env
+.env.*
+!.env.example
+fresh-resume.pdf
+fresh-resume.docx
+tailored-resume.pdf
+tailored-resume.docx
