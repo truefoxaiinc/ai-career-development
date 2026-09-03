@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import re
 import uuid
 import zipfile
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,162 +17,1499 @@ from sqlalchemy.orm import Session
 from app.ai.grounding import detect_prompt_injection, isolate_untrusted_text
 from app.core.config import Settings
 from app.integrations.storage import get_storage
-from app.models.entities import AsyncJob, AuditLog, Candidate, JobPreference, ProfileEntry, UploadedFile, User
+from app.models.entities import (
+    AsyncJob,
+    AuditLog,
+    Candidate,
+    JobPreference,
+    ProfileEntry,
+    UploadedFile,
+    User,
+)
 from app.repositories.common import candidate_for_user
 
+
 SKILLS = [
-    "Python","Java","JavaScript","TypeScript","React","Next.js","Node.js","FastAPI","Django","Flask","SQL","PostgreSQL","MySQL","Redis","Valkey","Docker","Kubernetes","AWS","Azure","GCP","Terraform","GraphQL","REST","Accessibility","Design systems","System design","Machine learning","Data analysis","Pandas","PyTorch","TensorFlow","Git","CI/CD","Testing","Playwright","Cypress","Leadership","Mentoring","Product management","Figma"
+    "Python",
+    "Java",
+    "JavaScript",
+    "TypeScript",
+    "React",
+    "Next.js",
+    "Node.js",
+    "FastAPI",
+    "Django",
+    "Flask",
+    "SQL",
+    "PostgreSQL",
+    "MySQL",
+    "Redis",
+    "Valkey",
+    "Docker",
+    "Kubernetes",
+    "AWS",
+    "Azure",
+    "GCP",
+    "Terraform",
+    "GraphQL",
+    "REST",
+    "Accessibility",
+    "Design systems",
+    "System design",
+    "Machine learning",
+    "Data analysis",
+    "Pandas",
+    "PyTorch",
+    "TensorFlow",
+    "Git",
+    "CI/CD",
+    "Testing",
+    "Playwright",
+    "Cypress",
+    "Leadership",
+    "Mentoring",
+    "Product management",
+    "Figma",
 ]
 
 
-def calculate_completion(candidate: Candidate, entries: list[ProfileEntry]) -> int:
+SECTION_NAMES = {
+    "experience": {
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+        "employment history",
+        "work history",
+        "career history",
+    },
+    "education": {
+        "education",
+        "academic background",
+        "academic history",
+        "qualifications",
+    },
+    "projects": {
+        "project",
+        "projects",
+        "personal projects",
+        "technical projects",
+        "academic projects",
+        "selected projects",
+    },
+    "certifications": {
+        "certification",
+        "certifications",
+        "certificates",
+        "licenses",
+        "licenses & certifications",
+        "licenses and certifications",
+    },
+    "skills": {
+        "skills",
+        "technical skills",
+        "core skills",
+        "technologies",
+        "technology",
+        "tools",
+        "technical expertise",
+    },
+    "summary": {
+        "summary",
+        "professional summary",
+        "profile",
+        "career summary",
+        "objective",
+        "career objective",
+        "about",
+    },
+}
+
+
+ROLE_PATTERN = re.compile(
+    r"\b("
+    r"engineer|developer|manager|architect|designer|analyst|"
+    r"consultant|scientist|specialist|administrator|"
+    r"lead|director|intern"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+EDUCATION_PATTERN = re.compile(
+    r"\b("
+    r"b\.?\s?tech|bachelor|b\.?e\.?|b\.?sc|"
+    r"m\.?\s?tech|master|m\.?e\.?|m\.?sc|"
+    r"ph\.?d|doctorate|mba|"
+    r"university|college|institute of technology"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+YEAR_PATTERN = re.compile(
+    r"\b(?:19|20)\d{2}\b"
+)
+
+
+JUNK_PHRASES = {
+    "working directory",
+    "backend working directory",
+    "frontend working directory",
+    "architecture plan",
+    "architecture document",
+    "project structure",
+    "folder structure",
+    "directory structure",
+    "keep them in the architecture",
+    "keep them in",
+    "source code",
+    "command prompt",
+    "powershell",
+}
+
+
+JUNK_FILE_EXTENSIONS = {
+    ".md",
+    ".py",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".env",
+    ".txt",
+    ".sh",
+    ".ps1",
+    ".bat",
+    ".cmd",
+}
+
+
+NAME_BLOCKLIST = {
+    "name",
+    "resume",
+    "curriculum vitae",
+    "cv",
+    "profile",
+    "summary",
+    "experience",
+    "education",
+    "skills",
+    "projects",
+    "certifications",
+    "career",
+    "professional",
+}
+
+
+def calculate_completion(
+    candidate: Candidate,
+    entries: list[ProfileEntry],
+) -> int:
     score = 0
+
     score += 10 if candidate.name else 0
     score += 10 if candidate.headline else 0
     score += 10 if candidate.location else 0
-    verified=[e for e in entries if e.verified]
-    types={e.entry_type for e in verified}
+
+    verified = [
+        entry
+        for entry in entries
+        if entry.verified
+    ]
+
+    types = {
+        entry.entry_type
+        for entry in verified
+    }
+
     score += 25 if "experience" in types else 0
     score += 15 if "education" in types else 0
     score += 20 if "skill" in types else 0
-    score += 10 if any(t in types for t in {"achievement","project","certification"}) else 0
-    return min(100,score)
+
+    score += (
+        10
+        if any(
+            entry_type in types
+            for entry_type in {
+                "achievement",
+                "project",
+                "certification",
+            }
+        )
+        else 0
+    )
+
+    return min(100, score)
 
 
-def profile_view(db: Session, user: User) -> dict:
-    candidate=candidate_for_user(db,user)
-    entries=list(db.scalars(select(ProfileEntry).where(ProfileEntry.candidate_id==candidate.id).order_by(ProfileEntry.entry_type,ProfileEntry.created_at)))
-    completion=calculate_completion(candidate,entries)
-    if candidate.profile_completion!=completion:
-        candidate.profile_completion=completion; db.commit()
+def profile_view(
+    db: Session,
+    user: User,
+) -> dict:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    entries = list(
+        db.scalars(
+            select(ProfileEntry)
+            .where(
+                ProfileEntry.candidate_id
+                == candidate.id
+            )
+            .order_by(
+                ProfileEntry.entry_type,
+                ProfileEntry.created_at,
+            )
+        )
+    )
+
+    completion = calculate_completion(
+        candidate,
+        entries,
+    )
+
+    if candidate.profile_completion != completion:
+        candidate.profile_completion = completion
+        db.commit()
+
     return {
-        "id":str(candidate.id),"name":candidate.name,"headline":candidate.headline,"location":candidate.location,"phone":candidate.phone,"links":candidate.links,"profile_summary":candidate.profile_summary,"profile_completion":completion,
-        "entries":[{"id":str(e.id),"entry_type":e.entry_type,"label":e.label,"structured_data":e.structured_data,"source_text":e.source_text,"verified":e.verified,"confidence":e.confidence,"source_file_id":str(e.source_file_id) if e.source_file_id else None,"verification_note":e.verification_note} for e in entries]
+        "id": str(candidate.id),
+        "name": candidate.name,
+        "headline": candidate.headline,
+        "location": candidate.location,
+        "phone": candidate.phone,
+        "links": candidate.links,
+        "profile_summary": candidate.profile_summary,
+        "profile_completion": completion,
+        "entries": [
+            {
+                "id": str(entry.id),
+                "entry_type": entry.entry_type,
+                "label": entry.label,
+                "structured_data": entry.structured_data,
+                "source_text": entry.source_text,
+                "verified": entry.verified,
+                "confidence": entry.confidence,
+                "source_file_id": (
+                    str(entry.source_file_id)
+                    if entry.source_file_id
+                    else None
+                ),
+                "verification_note": (
+                    entry.verification_note
+                ),
+            }
+            for entry in entries
+        ],
     }
 
 
-def update_candidate(db:Session,user:User,fields:dict)->Candidate:
-    candidate=candidate_for_user(db,user)
-    for key,value in fields.items():
-        if value is not None and hasattr(candidate,key): setattr(candidate,key,value.strip() if isinstance(value,str) else value)
-    db.add(AuditLog(user_id=user.id,action="profile.updated",resource_type="candidate",resource_id=str(candidate.id),metadata_json={"fields":sorted(k for k,v in fields.items() if v is not None)}))
-    db.commit(); return candidate
+def update_candidate(
+    db: Session,
+    user: User,
+    fields: dict,
+) -> Candidate:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    for key, value in fields.items():
+        if (
+            value is not None
+            and hasattr(candidate, key)
+        ):
+            setattr(
+                candidate,
+                key,
+                (
+                    value.strip()
+                    if isinstance(value, str)
+                    else value
+                ),
+            )
+
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="profile.updated",
+            resource_type="candidate",
+            resource_id=str(candidate.id),
+            metadata_json={
+                "fields": sorted(
+                    key
+                    for key, value
+                    in fields.items()
+                    if value is not None
+                )
+            },
+        )
+    )
+
+    db.commit()
+
+    return candidate
 
 
-def add_manual_entry(db:Session,user:User,payload)->ProfileEntry:
-    candidate=candidate_for_user(db,user)
-    entry=ProfileEntry(candidate_id=candidate.id,entry_type=payload.entry_type,label=payload.label.strip(),structured_data=payload.structured_data,source_text=payload.source_text,verified=True,confidence=1.0,verification_note="Entered directly by candidate",verified_at=datetime.now(UTC))
-    db.add(entry); db.add(AuditLog(user_id=user.id,action="profile.entry_created",resource_type="profile_entry",resource_id=str(entry.id),metadata_json={"type":payload.entry_type})); db.commit(); return entry
+def add_manual_entry(
+    db: Session,
+    user: User,
+    payload,
+) -> ProfileEntry:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    entry = ProfileEntry(
+        candidate_id=candidate.id,
+        entry_type=payload.entry_type,
+        label=payload.label.strip(),
+        structured_data=payload.structured_data,
+        source_text=payload.source_text,
+        verified=True,
+        confidence=1.0,
+        verification_note="Entered directly by candidate",
+        verified_at=datetime.now(UTC),
+    )
+
+    db.add(entry)
+
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="profile.entry_created",
+            resource_type="profile_entry",
+            resource_id=str(entry.id),
+            metadata_json={
+                "type": payload.entry_type
+            },
+        )
+    )
+
+    db.commit()
+
+    return entry
 
 
-def validate_resume_upload(file: UploadFile, data: bytes, settings: Settings) -> tuple[str,str]:
-    if len(data)>settings.upload_max_bytes: raise HTTPException(status_code=413,detail=f"Resume exceeds {settings.upload_max_bytes//(1024*1024)} MB limit")
-    name=(file.filename or "resume").lower(); ext=Path(name).suffix
-    allowed={".pdf":"application/pdf",".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
-    if ext not in allowed: raise HTTPException(status_code=415,detail="Only PDF and DOCX resumes are supported")
-    content_type=(file.content_type or "").lower()
-    if content_type not in {allowed[ext],"application/octet-stream"}:
-        raise HTTPException(status_code=415,detail="Resume MIME type does not match an allowed document type")
-    if ext==".pdf" and not data.startswith(b"%PDF-"): raise HTTPException(status_code=415,detail="File content is not a valid PDF")
-    if ext==".docx":
+def validate_resume_upload(
+    file: UploadFile,
+    data: bytes,
+    settings: Settings,
+) -> tuple[str, str]:
+    if len(data) > settings.upload_max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Resume exceeds "
+                f"{settings.upload_max_bytes // (1024 * 1024)} "
+                "MB limit"
+            ),
+        )
+
+    name = (
+        file.filename
+        or "resume"
+    ).lower()
+
+    ext = Path(name).suffix
+
+    allowed = {
+        ".pdf": "application/pdf",
+        ".docx": (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+    }
+
+    if ext not in allowed:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Only PDF and DOCX resumes "
+                "are supported"
+            ),
+        )
+
+    content_type = (
+        file.content_type
+        or ""
+    ).lower()
+
+    if content_type not in {
+        allowed[ext],
+        "application/octet-stream",
+    }:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Resume MIME type does not match "
+                "an allowed document type"
+            ),
+        )
+
+    if (
+        ext == ".pdf"
+        and not data.startswith(b"%PDF-")
+    ):
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "File content is not a valid PDF"
+            ),
+        )
+
+    if ext == ".docx":
         try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                if "word/document.xml" not in zf.namelist(): raise ValueError
-        except (zipfile.BadZipFile,ValueError) as exc: raise HTTPException(status_code=415,detail="File content is not a valid DOCX") from exc
-    return ext,allowed[ext]
+            with zipfile.ZipFile(
+                io.BytesIO(data)
+            ) as zf:
+                if (
+                    "word/document.xml"
+                    not in zf.namelist()
+                ):
+                    raise ValueError
+
+        except (
+            zipfile.BadZipFile,
+            ValueError,
+        ) as exc:
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    "File content is not a valid DOCX"
+                ),
+            ) from exc
+
+    return ext, allowed[ext]
 
 
-def store_resume(db:Session,user:User,file:UploadFile,data:bytes,settings:Settings)->UploadedFile:
-    candidate=candidate_for_user(db,user); ext,mime=validate_resume_upload(file,data,settings); digest=hashlib.sha256(data).hexdigest(); storage=get_storage(settings)
-    key=f"resumes/{candidate.id}/{uuid.uuid4()}{ext}"; storage.put_bytes(key,data,mime)
-    record=UploadedFile(candidate_id=candidate.id,kind="resume",original_name=Path(file.filename or f"resume{ext}").name[:255],mime_type=mime,size_bytes=len(data),sha256=digest,storage_key=key)
-    db.add(record); db.flush(); return record
+def store_resume(
+    db: Session,
+    user: User,
+    file: UploadFile,
+    data: bytes,
+    settings: Settings,
+) -> UploadedFile:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    ext, mime = validate_resume_upload(
+        file,
+        data,
+        settings,
+    )
+
+    digest = hashlib.sha256(
+        data
+    ).hexdigest()
+
+    storage = get_storage(
+        settings
+    )
+
+    key = (
+        f"resumes/{candidate.id}/"
+        f"{uuid.uuid4()}{ext}"
+    )
+
+    storage.put_bytes(
+        key,
+        data,
+        mime,
+    )
+
+    record = UploadedFile(
+        candidate_id=candidate.id,
+        kind="resume",
+        original_name=Path(
+            file.filename
+            or f"resume{ext}"
+        ).name[:255],
+        mime_type=mime,
+        size_bytes=len(data),
+        sha256=digest,
+        storage_key=key,
+    )
+
+    db.add(record)
+    db.flush()
+
+    return record
 
 
-def _extract_text(data:bytes,mime:str)->str:
-    if mime=="application/pdf":
-        reader=PdfReader(io.BytesIO(data)); text="\n".join((page.extract_text() or "") for page in reader.pages)
+def _extract_text(
+    data: bytes,
+    mime: str,
+) -> str:
+    if mime == "application/pdf":
+        reader = PdfReader(
+            io.BytesIO(data)
+        )
+
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in reader.pages
+        )
+
     else:
-        doc=Document(io.BytesIO(data)); text="\n".join(p.text for p in doc.paragraphs)
+        doc = Document(
+            io.BytesIO(data)
+        )
+
+        text = "\n".join(
+            paragraph.text
+            for paragraph in doc.paragraphs
+        )
+
         for table in doc.tables:
-            for row in table.rows: text += "\n"+" | ".join(cell.text for cell in row.cells)
-    return isolate_untrusted_text(text)
+            for row in table.rows:
+                text += (
+                    "\n"
+                    + " | ".join(
+                        cell.text
+                        for cell in row.cells
+                    )
+                )
+
+    return isolate_untrusted_text(
+        text
+    )
 
 
-def _extract_entries(text:str)->list[dict]:
-    lines=[re.sub(r"\s+"," ",x).strip() for x in text.splitlines() if x.strip()]
-    entries=[]
-    if lines:
-        first=lines[0]
-        if 2<=len(first)<=80 and not re.search(r"@|\d{7,}",first): entries.append({"entry_type":"personal","label":"Name","structured_data":{"name":first},"source_text":first,"confidence":0.72})
-    for skill in SKILLS:
-        if re.search(rf"(?<!\w){re.escape(skill)}(?!\w)",text,re.I): entries.append({"entry_type":"skill","label":skill,"structured_data":{"name":skill},"source_text":skill,"confidence":0.91})
-    education=[]; experience=[]; certs=[]; projects=[]
-    for line in lines:
-        low=line.lower()
-        if any(k in low for k in ["b.tech","bachelor","master","m.tech","university","college","institute of technology","ph.d","phd"]): education.append(line)
-        if any(k in low for k in ["engineer","developer","manager","architect","designer","analyst","consultant","scientist","lead ","director","specialist"]): experience.append(line)
-        if any(k in low for k in ["certified","certification","certificate"]): certs.append(line)
-        if any(k in low for k in ["project:","projects","built ","developed ","implemented "]): projects.append(line)
-    for line in education[:8]: entries.append({"entry_type":"education","label":line[:240],"structured_data":{"raw":line},"source_text":line,"confidence":0.70})
-    for line in experience[:14]: entries.append({"entry_type":"experience","label":line[:240],"structured_data":{"raw":line},"source_text":line,"confidence":0.62})
-    for line in certs[:8]: entries.append({"entry_type":"certification","label":line[:240],"structured_data":{"raw":line},"source_text":line,"confidence":0.68})
-    for line in projects[:8]: entries.append({"entry_type":"project","label":line[:240],"structured_data":{"raw":line},"source_text":line,"confidence":0.58})
-    # Deduplicate same type + normalized label.
-    seen=set(); out=[]
-    for e in entries:
-        key=(e["entry_type"],e["label"].lower())
-        if key not in seen: seen.add(key); out.append(e)
-    return out
+def _normalized_line(
+    value: str,
+) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value),
+    ).strip()
 
 
-def process_resume_parse_task(db:Session,task:AsyncJob)->None:
-    from app.domains.tasks.service import update_task
-    file_id=uuid.UUID(task.payload["file_id"]); record=db.get(UploadedFile,file_id)
-    if not record: update_task(db,task,status="failed",progress=100,error_code="file_missing"); return
-    update_task(db,task,progress=20); data=get_storage().get_bytes(record.storage_key); update_task(db,task,progress=35)
-    text=_extract_text(data,record.mime_type)
-    if len(text.strip())<20: update_task(db,task,status="failed",progress=100,error_code="resume_text_unreadable"); return
-    flags=detect_prompt_injection(text); update_task(db,task,progress=55)
-    db.execute(delete(ProfileEntry).where(ProfileEntry.source_file_id==record.id,ProfileEntry.verified.is_(False)))
-    extracted=_extract_entries(text)
-    for item in extracted:
-        db.add(ProfileEntry(candidate_id=record.candidate_id,source_file_id=record.id,verified=False,verification_note="Extracted from resume; candidate confirmation required",**item))
-    db.commit(); update_task(db,task,status="succeeded",progress=100,result={"file_id":str(record.id),"extracted_count":len(extracted),"review_required":True,"prompt_injection_flags":len(flags)})
+def _normalized_key(
+    value: str,
+) -> str:
+    value = _normalized_line(
+        value
+    ).casefold()
+
+    value = re.sub(
+        r"[^\w+#./-]+",
+        " ",
+        value,
+    )
+
+    return re.sub(
+        r"\s+",
+        " ",
+        value,
+    ).strip()
 
 
-def verify_entries(db:Session,user:User,decisions)->dict:
-    candidate=candidate_for_user(db,user); accepted=edited=rejected=0
-    for d in decisions:
-        entry=db.get(ProfileEntry,d.entry_id)
-        if not entry or entry.candidate_id!=candidate.id: raise HTTPException(status_code=404,detail="Profile entry not found")
-        if d.action=="reject": db.delete(entry); rejected+=1; continue
-        if d.action=="edit":
-            if d.label: entry.label=d.label.strip()
-            if d.structured_data is not None: entry.structured_data=d.structured_data
-            edited+=1
-        else: accepted+=1
-        entry.verified=True; entry.verified_at=datetime.now(UTC); entry.confidence=1.0; entry.verification_note="Verified by candidate"
-        if entry.entry_type=="personal" and "name" in entry.structured_data and not candidate.name: candidate.name=str(entry.structured_data["name"])[:200]
-    entries=list(db.scalars(select(ProfileEntry).where(ProfileEntry.candidate_id==candidate.id))); candidate.profile_completion=calculate_completion(candidate,entries)
-    db.add(AuditLog(user_id=user.id,action="profile.extraction_verified",resource_type="candidate",resource_id=str(candidate.id),metadata_json={"accepted":accepted,"edited":edited,"rejected":rejected})); db.commit()
-    return {"accepted":accepted,"edited":edited,"rejected":rejected,"profile_completion":candidate.profile_completion}
+def _section_for_line(
+    line: str,
+) -> str | None:
+    normalized = re.sub(
+        r"[:\-–—]+$",
+        "",
+        line.strip().casefold(),
+    ).strip()
+
+    for section, headings in SECTION_NAMES.items():
+        if normalized in headings:
+            return section
+
+    return None
 
 
-def profile_analysis(db:Session,user:User)->dict:
-    candidate=candidate_for_user(db,user); entries=list(db.scalars(select(ProfileEntry).where(ProfileEntry.candidate_id==candidate.id,ProfileEntry.verified.is_(True))))
-    skills={e.label.lower() for e in entries if e.entry_type=="skill"}
-    categories=[
-        ("Frontend Engineering",{"react","typescript","javascript","next.js","accessibility","design systems"}),
-        ("Backend Engineering",{"python","java","fastapi","django","node.js","postgresql","redis","valkey","rest"}),
-        ("Platform / DevOps",{"docker","kubernetes","terraform","aws","azure","gcp","ci/cd"}),
-        ("Data / ML",{"python","machine learning","data analysis","pandas","pytorch","tensorflow","sql"}),
-        ("Product Engineering",{"react","typescript","node.js","postgresql","product management","figma"}),
+def _is_junk_line(
+    line: str,
+) -> bool:
+    stripped = _normalized_line(
+        line
+    )
+
+    if not stripped:
+        return True
+
+    low = stripped.casefold()
+
+    if len(stripped) > 400:
+        return True
+
+    if low in NAME_BLOCKLIST:
+        return True
+
+    if any(
+        phrase in low
+        for phrase in JUNK_PHRASES
+    ):
+        return True
+
+    # Reject obvious source-code / documentation file names.
+    path_candidate = low.rstrip(
+        ".,;:()[]{}"
+    )
+
+    if any(
+        path_candidate.endswith(extension)
+        for extension in JUNK_FILE_EXTENSIONS
+    ):
+        return True
+
+    # Reject obvious Windows or Unix filesystem paths.
+    if re.search(
+        r"(?:[a-z]:\\|[/\\](?:app|src|backend|frontend|home|users?)[/\\])",
+        low,
+        re.IGNORECASE,
+    ):
+        return True
+
+    # Reject obvious shell/code-like instructions.
+    #
+    # Do NOT reject every line beginning with "Python ",
+    # because legitimate resume titles can be things such as:
+    # "Python Backend Developer".
+    if low.startswith(
+        (
+            "cd ",
+            "pip ",
+            "npm ",
+            "npx ",
+            "git ",
+            "docker ",
+            "uvicorn ",
+            "pytest ",
+            "powershell ",
+        )
+    ):
+        return True
+
+    # Detect actual Python command lines without confusing
+    # professional titles such as "Python Backend Developer".
+    if re.match(
+        r"^(?:python(?:3(?:\.\d+)*)?|py)\s+"
+        r"(?:"
+        r"-m\b|"
+        r"-c\b|"
+        r"-\S+|"
+        r"\S+\.(?:py|pyw)\b"
+        r")",
+        low,
+    ):
+        return True
+
+    return False
+
+
+def _looks_like_person_name(
+    line: str,
+) -> bool:
+    line = _normalized_line(
+        line
+    )
+
+    if _is_junk_line(line):
+        return False
+
+    if not 3 <= len(line) <= 70:
+        return False
+
+    if re.search(
+        r"[@:/\\|<>{}\[\]\d]",
+        line,
+    ):
+        return False
+
+    low = line.casefold()
+
+    if low in NAME_BLOCKLIST:
+        return False
+
+    if _section_for_line(line):
+        return False
+
+    # File-like strings should never be interpreted as names.
+    if re.search(
+        r"\.[a-z0-9]{1,5}$",
+        low,
+    ):
+        return False
+
+    words = line.split()
+
+    if not 2 <= len(words) <= 6:
+        return False
+
+    # Avoid interpreting job titles as candidate names.
+    if ROLE_PATTERN.search(line):
+        return False
+
+    skill_names = {
+        skill.casefold()
+        for skill in SKILLS
+    }
+
+    if any(
+        word.casefold() in skill_names
+        for word in words
+    ):
+        return False
+
+    name_word_pattern = re.compile(
+        r"^[A-Za-zÀ-ÖØ-öø-ÿ]"
+        r"[A-Za-zÀ-ÖØ-öø-ÿ'’.-]*$"
+    )
+
+    if not all(
+        name_word_pattern.fullmatch(word)
+        for word in words
+    ):
+        return False
+
+    return True
+
+
+def _looks_like_experience_line(
+    line: str,
+    section: str | None,
+) -> bool:
+    if _is_junk_line(line):
+        return False
+
+    if not ROLE_PATTERN.search(line):
+        return False
+
+    words = line.split()
+
+    # Avoid treating long prose/summary sentences containing
+    # "developer", "manager", etc. as a job position.
+    if len(words) > 20:
+        return False
+
+    if section == "experience":
+        return True
+
+    # Outside an explicit experience section, require stronger
+    # position-like evidence.
+    has_year = bool(
+        YEAR_PATTERN.search(line)
+    )
+
+    has_separator = any(
+        separator in line
+        for separator in {
+            " | ",
+            " - ",
+            " – ",
+            " — ",
+            " @ ",
+        }
+    )
+
+    has_company_relation = bool(
+        re.search(
+            r"\b(?:at|with)\s+[A-Z]",
+            line,
+        )
+    )
+
+    short_title = (
+        len(words) <= 7
+        and len(line) <= 100
+    )
+
+    return (
+        has_year
+        or has_separator
+        or has_company_relation
+        or short_title
+    )
+
+
+def _looks_like_education_line(
+    line: str,
+    section: str | None,
+) -> bool:
+    if _is_junk_line(line):
+        return False
+
+    words = line.split()
+
+    if len(words) > 35:
+        return False
+
+    if section == "education":
+        return True
+
+    return bool(
+        EDUCATION_PATTERN.search(line)
+    )
+
+
+def _looks_like_certification_line(
+    line: str,
+    section: str | None,
+) -> bool:
+    if _is_junk_line(line):
+        return False
+
+    low = line.casefold()
+
+    if len(line.split()) > 30:
+        return False
+
+    if section == "certifications":
+        return True
+
+    return any(
+        word in low
+        for word in {
+            "certified",
+            "certification",
+            "certificate",
+            "credential",
+        }
+    )
+
+
+def _looks_like_project_line(
+    line: str,
+    section: str | None,
+) -> bool:
+    if _is_junk_line(line):
+        return False
+
+    low = line.casefold()
+
+    if len(line.split()) > 40:
+        return False
+
+    if section == "projects":
+        return True
+
+    # Outside the projects section, require an explicit project label.
+    return bool(
+        re.match(
+            r"^(?:project|project name)\s*[:\-]",
+            low,
+        )
+    )
+
+
+def _entry_key(
+    entry_type: str,
+    label: str,
+) -> tuple[str, str]:
+    return (
+        entry_type.casefold(),
+        _normalized_key(label),
+    )
+
+
+def _extract_entries(
+    text: str,
+) -> list[dict]:
+    lines = [
+        _normalized_line(line)
+        for line in text.splitlines()
+        if _normalized_line(line)
     ]
-    scored=[]
-    for name,expected in categories:
-        hit=len(skills & expected); fit=round(100*hit/max(1,min(len(expected),5)))
-        if hit: scored.append({"category":name,"fit":min(96,40+fit//2),"reason":f"Supported by {hit} verified skill{'s' if hit!=1 else ''}: "+", ".join(sorted({x for x in skills if x in expected})[:5])})
-    if not scored: scored=[{"category":"General professional","fit":50,"reason":"Add verified skills and experience to improve analysis confidence."}]
-    scored.sort(key=lambda x:x["fit"],reverse=True)
-    return {"primary":scored[0],"adjacent":scored[1:4],"verified_entry_count":len(entries),"method":"verified-profile heuristic v1"}
+
+    entries: list[dict] = []
+
+    # -----------------------------
+    # Candidate name
+    # -----------------------------
+    # Search only near the top of the resume rather than assuming
+    # that line 1 is a person's name.
+    for line in lines[:8]:
+        if _section_for_line(line):
+            break
+
+        if _looks_like_person_name(line):
+            entries.append(
+                {
+                    "entry_type": "personal",
+                    "label": line,
+                    "structured_data": {
+                        "name": line
+                    },
+                    "source_text": line,
+                    "confidence": 0.82,
+                }
+            )
+            break
+
+    # -----------------------------
+    # Skills
+    # -----------------------------
+    for skill in SKILLS:
+        if re.search(
+            rf"(?<!\w){re.escape(skill)}(?!\w)",
+            text,
+            re.IGNORECASE,
+        ):
+            entries.append(
+                {
+                    "entry_type": "skill",
+                    "label": skill,
+                    "structured_data": {
+                        "name": skill
+                    },
+                    "source_text": skill,
+                    "confidence": 0.91,
+                }
+            )
+
+    # -----------------------------
+    # Structured resume sections
+    # -----------------------------
+    current_section: str | None = None
+
+    education: list[str] = []
+    experience: list[str] = []
+    certifications: list[str] = []
+    projects: list[str] = []
+
+    for line in lines:
+        detected_section = _section_for_line(
+            line
+        )
+
+        if detected_section:
+            current_section = detected_section
+            continue
+
+        if _is_junk_line(line):
+            continue
+
+        if _looks_like_education_line(
+            line,
+            current_section,
+        ):
+            education.append(line)
+
+        if _looks_like_experience_line(
+            line,
+            current_section,
+        ):
+            experience.append(line)
+
+        if _looks_like_certification_line(
+            line,
+            current_section,
+        ):
+            certifications.append(line)
+
+        if _looks_like_project_line(
+            line,
+            current_section,
+        ):
+            projects.append(line)
+
+    for line in education[:8]:
+        entries.append(
+            {
+                "entry_type": "education",
+                "label": line[:240],
+                "structured_data": {
+                    "raw": line
+                },
+                "source_text": line,
+                "confidence": 0.78,
+            }
+        )
+
+    for line in experience[:14]:
+        entries.append(
+            {
+                "entry_type": "experience",
+                "label": line[:240],
+                "structured_data": {
+                    "raw": line
+                },
+                "source_text": line,
+                "confidence": 0.74,
+            }
+        )
+
+    for line in certifications[:8]:
+        entries.append(
+            {
+                "entry_type": "certification",
+                "label": line[:240],
+                "structured_data": {
+                    "raw": line
+                },
+                "source_text": line,
+                "confidence": 0.76,
+            }
+        )
+
+    for line in projects[:8]:
+        entries.append(
+            {
+                "entry_type": "project",
+                "label": line[:240],
+                "structured_data": {
+                    "raw": line
+                },
+                "source_text": line,
+                "confidence": 0.70,
+            }
+        )
+
+    # Deduplicate entries generated from the same resume.
+    seen: set[tuple[str, str]] = set()
+    output: list[dict] = []
+
+    for entry in entries:
+        key = _entry_key(
+            entry["entry_type"],
+            entry["label"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        output.append(entry)
+
+    return output
+
+
+def process_resume_parse_task(
+    db: Session,
+    task: AsyncJob,
+) -> None:
+    from app.domains.tasks.service import update_task
+
+    file_id = uuid.UUID(
+        task.payload["file_id"]
+    )
+
+    record = db.get(
+        UploadedFile,
+        file_id,
+    )
+
+    if not record:
+        update_task(
+            db,
+            task,
+            status="failed",
+            progress=100,
+            error_code="file_missing",
+        )
+        return
+
+    update_task(
+        db,
+        task,
+        progress=20,
+    )
+
+    data = get_storage().get_bytes(
+        record.storage_key
+    )
+
+    update_task(
+        db,
+        task,
+        progress=35,
+    )
+
+    text = _extract_text(
+        data,
+        record.mime_type,
+    )
+
+    if len(text.strip()) < 20:
+        update_task(
+            db,
+            task,
+            status="failed",
+            progress=100,
+            error_code="resume_text_unreadable",
+        )
+        return
+
+    flags = detect_prompt_injection(
+        text
+    )
+
+    update_task(
+        db,
+        task,
+        progress=55,
+    )
+
+    # Remove only unverified entries from an earlier parse of this
+    # exact file. Candidate-approved data is never silently deleted.
+    db.execute(
+        delete(ProfileEntry).where(
+            ProfileEntry.source_file_id == record.id,
+            ProfileEntry.verified.is_(False),
+        )
+    )
+
+    extracted = _extract_entries(
+        text
+    )
+
+    candidate = db.get(
+        Candidate,
+        record.candidate_id,
+    )
+
+    # Existing verified profile facts are authoritative.
+    existing_verified = list(
+        db.scalars(
+            select(ProfileEntry).where(
+                ProfileEntry.candidate_id
+                == record.candidate_id,
+                ProfileEntry.verified.is_(True),
+            )
+        )
+    )
+
+    existing_keys = {
+        _entry_key(
+            entry.entry_type,
+            entry.label,
+        )
+        for entry in existing_verified
+    }
+
+    filtered: list[dict] = []
+
+    for item in extracted:
+        # If the profile already has a candidate name, do not create
+        # another extracted personal/name entry.
+        if (
+            item["entry_type"] == "personal"
+            and candidate
+            and candidate.name
+        ):
+            continue
+
+        key = _entry_key(
+            item["entry_type"],
+            item["label"],
+        )
+
+        # Avoid duplicate Python/FastAPI/etc. entries when the same
+        # fact has already been manually entered or verified.
+        if key in existing_keys:
+            continue
+
+        filtered.append(item)
+        existing_keys.add(key)
+
+    for item in filtered:
+        db.add(
+            ProfileEntry(
+                candidate_id=record.candidate_id,
+                source_file_id=record.id,
+                verified=False,
+                verification_note=(
+                    "Extracted from resume; "
+                    "candidate confirmation required"
+                ),
+                **item,
+            )
+        )
+
+    db.commit()
+
+    update_task(
+        db,
+        task,
+        status="succeeded",
+        progress=100,
+        result={
+            "file_id": str(record.id),
+            "extracted_count": len(filtered),
+            "review_required": bool(filtered),
+            "prompt_injection_flags": len(flags),
+        },
+    )
+
+
+def verify_entries(
+    db: Session,
+    user: User,
+    decisions,
+) -> dict:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    accepted = 0
+    edited = 0
+    rejected = 0
+
+    for decision in decisions:
+        entry = db.get(
+            ProfileEntry,
+            decision.entry_id,
+        )
+
+        if (
+            not entry
+            or entry.candidate_id
+            != candidate.id
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="Profile entry not found",
+            )
+
+        if decision.action == "reject":
+            db.delete(entry)
+            rejected += 1
+            continue
+
+        if decision.action == "edit":
+            if decision.label:
+                entry.label = (
+                    decision.label.strip()
+                )
+
+            if (
+                decision.structured_data
+                is not None
+            ):
+                entry.structured_data = (
+                    decision.structured_data
+                )
+
+            edited += 1
+
+        else:
+            accepted += 1
+
+        entry.verified = True
+        entry.verified_at = datetime.now(UTC)
+        entry.confidence = 1.0
+        entry.verification_note = (
+            "Verified by candidate"
+        )
+
+        if (
+            entry.entry_type == "personal"
+            and "name"
+            in entry.structured_data
+            and not candidate.name
+        ):
+            candidate.name = str(
+                entry.structured_data["name"]
+            )[:200]
+
+    entries = list(
+        db.scalars(
+            select(ProfileEntry).where(
+                ProfileEntry.candidate_id
+                == candidate.id
+            )
+        )
+    )
+
+    candidate.profile_completion = (
+        calculate_completion(
+            candidate,
+            entries,
+        )
+    )
+
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="profile.extraction_verified",
+            resource_type="candidate",
+            resource_id=str(candidate.id),
+            metadata_json={
+                "accepted": accepted,
+                "edited": edited,
+                "rejected": rejected,
+            },
+        )
+    )
+
+    db.commit()
+
+    return {
+        "accepted": accepted,
+        "edited": edited,
+        "rejected": rejected,
+        "profile_completion": (
+            candidate.profile_completion
+        ),
+    }
+
+
+def profile_analysis(
+    db: Session,
+    user: User,
+) -> dict:
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    entries = list(
+        db.scalars(
+            select(ProfileEntry).where(
+                ProfileEntry.candidate_id
+                == candidate.id,
+                ProfileEntry.verified.is_(True),
+            )
+        )
+    )
+
+    skills = {
+        entry.label.lower()
+        for entry in entries
+        if entry.entry_type == "skill"
+    }
+
+    categories = [
+        (
+            "Frontend Engineering",
+            {
+                "react",
+                "typescript",
+                "javascript",
+                "next.js",
+                "accessibility",
+                "design systems",
+            },
+        ),
+        (
+            "Backend Engineering",
+            {
+                "python",
+                "java",
+                "fastapi",
+                "django",
+                "node.js",
+                "postgresql",
+                "redis",
+                "valkey",
+                "rest",
+            },
+        ),
+        (
+            "Platform / DevOps",
+            {
+                "docker",
+                "kubernetes",
+                "terraform",
+                "aws",
+                "azure",
+                "gcp",
+                "ci/cd",
+            },
+        ),
+        (
+            "Data / ML",
+            {
+                "python",
+                "machine learning",
+                "data analysis",
+                "pandas",
+                "pytorch",
+                "tensorflow",
+                "sql",
+            },
+        ),
+        (
+            "Product Engineering",
+            {
+                "react",
+                "typescript",
+                "node.js",
+                "postgresql",
+                "product management",
+                "figma",
+            },
+        ),
+    ]
+
+    scored = []
+
+    for name, expected in categories:
+        hit = len(
+            skills & expected
+        )
+
+        fit = round(
+            100
+            * hit
+            / max(
+                1,
+                min(
+                    len(expected),
+                    5,
+                ),
+            )
+        )
+
+        if hit:
+            matched = sorted(
+                {
+                    skill
+                    for skill in skills
+                    if skill in expected
+                }
+            )[:5]
+
+            scored.append(
+                {
+                    "category": name,
+                    "fit": min(
+                        96,
+                        40 + fit // 2,
+                    ),
+                    "reason": (
+                        f"Supported by {hit} verified "
+                        f"skill{'s' if hit != 1 else ''}: "
+                        + ", ".join(matched)
+                    ),
+                }
+            )
+
+    if not scored:
+        scored = [
+            {
+                "category": "General professional",
+                "fit": 50,
+                "reason": (
+                    "Add verified skills and experience "
+                    "to improve analysis confidence."
+                ),
+            }
+        ]
+
+    scored.sort(
+        key=lambda item: item["fit"],
+        reverse=True,
+    )
+
+    return {
+        "primary": scored[0],
+        "adjacent": scored[1:4],
+        "verified_entry_count": len(entries),
+        "method": (
+            "verified-profile heuristic v1"
+        ),
+    }
