@@ -17,7 +17,11 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.ai.gateway import LiteLLMGateway
+from app.ai.gateway import (
+    LiteLLMGateway,
+    LiteLLMGatewayError,
+    LiteLLMResponseError,
+)
 from app.ai.grounding import isolate_untrusted_text, verify_document_claims
 from app.core.config import Settings
 from app.models.entities import (
@@ -310,7 +314,7 @@ def _llm_generate(
     content = result.get("content")
 
     if not isinstance(content, str) or len(content) < 20:
-        raise RuntimeError(
+        raise LiteLLMResponseError(
             "LLM returned invalid document content"
         )
 
@@ -374,17 +378,34 @@ def generate_document(
     generator = "deterministic-grounded"
 
     if gateway.configured:
-        content = _llm_generate(
-            db,
-            user,
-            settings,
-            candidate,
-            entries,
-            job,
-            document_type,
-        )
+        try:
+            content = _llm_generate(
+                db,
+                user,
+                settings,
+                candidate,
+                entries,
+                job,
+                document_type,
+            )
 
-        generator = "litellm-grounded"
+            generator = "litellm-grounded"
+
+        except LiteLLMGatewayError:
+            if document_type == "resume":
+                content = _deterministic_resume(
+                    candidate,
+                    entries,
+                    job,
+                )
+            else:
+                content = _deterministic_cover_letter(
+                    candidate,
+                    entries,
+                    job,
+                )
+
+            generator = "deterministic-ai-fallback"
 
     elif document_type == "resume":
         content = _deterministic_resume(
