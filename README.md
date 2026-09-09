@@ -41,6 +41,47 @@ npm run typecheck
 npm run build
 ```
 
+## Run with Docker and OpenAI
+
+Docker Compose starts the Next.js frontend, FastAPI API, PostgreSQL with pgvector, and Redis. The API uses OpenAI through the OpenAI-compatible gateway settings in `.env.docker`.
+
+```bash
+copy .env.docker.example .env.docker
+# Edit .env.docker and set LITELLM_API_KEY to your OpenAI API key.
+docker compose --env-file .env.docker up --build
+```
+
+Open `http://localhost:3000`. The API is available at `http://localhost:8000/docs`.
+
+To stop the stack while keeping downloaded data:
+
+```bash
+docker compose --env-file .env.docker down
+```
+
+## Production Docker deployment
+
+The production stack is separate from local development and requires real secrets, a public frontend/API URL, SMTP, and OpenAI configuration. It includes PostgreSQL with pgvector, Redis with persistence, MinIO S3-compatible object storage, the API, a database-backed worker, and the Next.js frontend. Put the production file in a secret-managed deployment environment; do not commit it.
+
+```bash
+copy .env.production.example .env.production
+# Edit .env.production with production URLs, secrets, SMTP, and OpenAI settings.
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+```
+
+Check the deployment:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml ps
+docker compose --env-file .env.production -f docker-compose.production.yml logs -f api worker
+```
+
+Terminate it without deleting persistent volumes:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml down
+```
+
 ## Scope deliberately excluded
 
 Recruiter marketplace, referral agent screens, and voice/video interview UI.
