@@ -1,0 +1,57 @@
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - path: .env.docker
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://careerpilot:careerpilot@postgres:5432/careerpilot
+      VALKEY_URL: redis://redis:6379/0
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-storage:/app/.careerpilot-storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: careerpilot
+      POSTGRES_USER: careerpilot
+      POSTGRES_PASSWORD: careerpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careerpilot -d careerpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  backend-storage:
+  postgres-data:
+  redis-data:
