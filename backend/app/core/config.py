@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     task_mode: Literal["inline", "database"] = "inline"
     valkey_url: str | None = None
     rate_limit_per_minute: int = 120
+    resume_studio_rate_limit_per_minute: int = 30
 
     litellm_base_url: str | None = None
     litellm_api_key: str | None = None

@@ -65,7 +65,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             q = self._events[key]
             while q and q[0] < now - 60:
                 q.popleft()
-            if len(q) >= settings.rate_limit_per_minute:
+            limit = settings.resume_studio_rate_limit_per_minute if request.url.path.startswith(f"{settings.api_prefix}/resume-studio") else settings.rate_limit_per_minute
+            if len(q) >= limit:
                 return JSONResponse(status_code=429, content={"ok": False, "error": {"code": "rate_limited", "message": "Too many requests", "fields": []}}, headers={"Retry-After": "60"})
             q.append(now)
         return await call_next(request)

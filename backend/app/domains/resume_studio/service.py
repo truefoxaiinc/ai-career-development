@@ -118,9 +118,9 @@ def create_manual_target(db: Session, user: User, title: str, company: str, desc
     candidate = candidate_for_user(db, user)
     digest = uuid.uuid5(uuid.NAMESPACE_URL, f"{candidate.id}:{title}:{company}:{description}")
     external_id = f"studio-{digest}"
-    existing = db.scalar(select(JobPosting).where(JobPosting.source == "manual", JobPosting.external_id == external_id))
+    existing = db.scalar(select(JobPosting).where(JobPosting.source == "candidate_input", JobPosting.external_id == external_id))
     if existing: return existing
-    job = JobPosting(source="manual", external_id=external_id, title=title, company=company, description=isolate_untrusted_text(description), location="", apply_url="", requirements=infer_requirements(description), ingestion_meta={"created_by": str(user.id), "resume_studio": True})
+    job = JobPosting(source="candidate_input", external_id=external_id, title=title, company=company, description=isolate_untrusted_text(description), location="", apply_url="", requirements=infer_requirements(description), ingestion_meta={"candidate_id": str(candidate.id), "created_by": str(user.id), "resume_studio": True})
     db.add(job); db.commit(); return job
 
 

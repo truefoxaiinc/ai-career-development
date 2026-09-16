@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.database import SessionLocal
 from app.models.entities import AIUsageLog, User
 
 
@@ -187,8 +188,7 @@ class LiteLLMGateway:
         latency_ms: int,
         estimated_cost: Decimal,
     ) -> None:
-        db.add(
-            AIUsageLog(
+        usage_log = AIUsageLog(
                 user_id=user.id,
                 feature=feature,
                 provider="litellm",
@@ -202,7 +202,17 @@ class LiteLLMGateway:
                 latency_ms=latency_ms,
                 estimated_cost_usd=estimated_cost,
             )
-        )
+        # Usage represents an external call that has already incurred cost.
+        # Persist it independently so a later domain rollback cannot erase it.
+        if isinstance(db, Session):
+            telemetry = SessionLocal()
+            try:
+                telemetry.add(usage_log)
+                telemetry.commit()
+            finally:
+                telemetry.close()
+        else:  # Keeps the gateway straightforward to unit-test with a mock session.
+            db.add(usage_log)
 
     @staticmethod
     def _extract_cost(
