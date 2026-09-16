@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from html import escape
 
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from fastapi import HTTPException
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.colors import HexColor
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
@@ -696,13 +697,17 @@ def export_pdf_bytes(
 
     styles = getSampleStyleSheet()
 
+    template = doc.template_key or "ats"
+    accents = {"ats": "#111827", "modern": "#0891b2", "minimal": "#52525b", "professional": "#1d4ed8"}
+    accent = HexColor(accents.get(template, accents["ats"]))
     body = ParagraphStyle(
         "CPBody",
         parent=styles["BodyText"],
         fontName="Helvetica",
-        fontSize=9.5,
-        leading=13,
+        fontSize=9 if template == "minimal" else 9.5,
+        leading=14 if template == "modern" else 13,
         spaceAfter=5,
+        textColor=HexColor("#27272a"),
         alignment=TA_LEFT,
     )
 
@@ -714,6 +719,7 @@ def export_pdf_bytes(
         leading=14,
         spaceBefore=8,
         spaceAfter=5,
+        textColor=accent,
     )
 
     story = []
@@ -767,8 +773,8 @@ def export_pdf_bytes(
     SimpleDocTemplate(
         buf,
         pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
+        rightMargin=(20 if template == "minimal" else 16) * mm,
+        leftMargin=(20 if template == "minimal" else 16) * mm,
         topMargin=15 * mm,
         bottomMargin=15 * mm,
         title=doc.title,
@@ -785,7 +791,9 @@ def export_docx_bytes(
 
     section = out.sections[0]
 
-    section.top_margin = Inches(0.65)
+    template = doc.template_key or "ats"
+    accents = {"ats": RGBColor(17,24,39), "modern": RGBColor(8,145,178), "minimal": RGBColor(82,82,91), "professional": RGBColor(29,78,216)}
+    section.top_margin = Inches(0.8 if template == "minimal" else 0.65)
     section.bottom_margin = Inches(0.65)
     section.left_margin = Inches(0.7)
     section.right_margin = Inches(0.7)
@@ -818,6 +826,7 @@ def export_docx_bytes(
 
             run.bold = True
             run.font.size = Pt(11)
+            run.font.color.rgb = accents.get(template, accents["ats"])
 
         elif line.startswith("•"):
             clean_line = _strip_bullet_prefix(
