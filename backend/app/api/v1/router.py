@@ -11,6 +11,7 @@ from app.domains.notifications.router import router as notifications_router
 from app.domains.privacy.router import router as privacy_router
 from app.domains.profiles.router import router as profiles_router
 from app.domains.tasks.router import router as tasks_router
+from app.domains.resume_studio.router import router as resume_studio_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -23,4 +24,5 @@ router.include_router(career_router)
 router.include_router(notifications_router)
 router.include_router(privacy_router)
 router.include_router(tasks_router)
+router.include_router(resume_studio_router)
 router.include_router(admin_router)

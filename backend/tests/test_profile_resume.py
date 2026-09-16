@@ -8,8 +8,12 @@ def test_resume_upload_parse_and_candidate_verification(client):
     buf=io.BytesIO();doc.save(buf)
     upload=client.post("/api/v1/profile/resume",files={"file":("resume.docx",buf.getvalue(),"application/vnd.openxmlformats-officedocument.wordprocessingml.document")})
     assert upload.status_code==202,upload.text
-    task=client.get(f"/api/v1/tasks/{upload.json()['data']['task_id']}").json()["data"]
+    upload_data=upload.json()["data"]
+    assert upload_data["file_id"]
+    task=client.get(f"/api/v1/tasks/{upload_data['task_id']}").json()["data"]
     assert task["status"]=="succeeded"
+    assert task["result"]["file_id"]==upload_data["file_id"]
+    assert task["result"]["extracted_count"]>0
     extracted=client.get("/api/v1/profile/extracted").json()["data"]
     assert extracted and all(not x.get("verified",False) for x in extracted)
     decisions=[{"entry_id":x["id"],"action":"accept"} for x in extracted]

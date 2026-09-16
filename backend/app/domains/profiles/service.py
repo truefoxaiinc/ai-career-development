@@ -1310,6 +1310,10 @@ def process_resume_parse_task(
         )
         return
 
+    record.processing_status = "processing"
+    record.extraction_error = None
+    db.commit()
+
     update_task(
         db,
         task,
@@ -1332,6 +1336,9 @@ def process_resume_parse_task(
     )
 
     if len(text.strip()) < 20:
+        record.processing_status = "failed"
+        record.extraction_error = "resume_text_unreadable"
+        db.commit()
         update_task(
             db,
             task,
@@ -1366,6 +1373,9 @@ def process_resume_parse_task(
     )
 
     if not candidate:
+        record.processing_status = "failed"
+        record.extraction_error = "candidate_missing"
+        db.commit()
         update_task(
             db,
             task,
@@ -1381,6 +1391,9 @@ def process_resume_parse_task(
     )
 
     if not user:
+        record.processing_status = "failed"
+        record.extraction_error = "user_missing"
+        db.commit()
         update_task(
             db,
             task,
@@ -1461,6 +1474,8 @@ def process_resume_parse_task(
             )
         )
 
+    record.processing_status = "completed"
+    record.extraction_error = None
     db.commit()
 
     update_task(

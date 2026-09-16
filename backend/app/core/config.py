@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     litellm_model: str | None = None
     llm_timeout_seconds: float = 45.0
     llm_max_cost_usd_per_request: float = 0.10
+    llm_max_output_tokens: int = 2400
+    llm_retry_attempts: int = 2
 
     matching_weights_json: str = '{"skills":0.30,"experience":0.20,"education":0.15,"domain":0.15,"tools":0.10,"preferences":0.05,"additional":0.05}'
 

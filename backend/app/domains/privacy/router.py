@@ -19,7 +19,7 @@ from app.integrations.storage import get_storage
 from app.models.entities import (
     Application,AuditLog,CareerGapAnalysis,ConsentRecord,DevelopmentRoadmap,GeneratedDocument,
     InterviewSession,JobPreference,MatchResult,Notification,NotificationSetting,ProfileEntry,
-    SavedJob,STARAnswer,UploadedFile,User
+    SavedJob,STARAnswer,UploadedFile,ResumeSuggestion,DocumentExport,User
 )
 from app.repositories.common import candidate_for_user
 from app.schemas.common import success
@@ -63,6 +63,9 @@ def export_data(user:Annotated[User,Depends(require_verified_user)],db:Annotated
         "match_results":_rows(db.scalars(select(MatchResult).where(MatchResult.candidate_id==c.id)).all()),
         "saved_jobs":_rows(db.scalars(select(SavedJob).where(SavedJob.candidate_id==c.id)).all()),
         "generated_documents":_rows(db.scalars(select(GeneratedDocument).where(GeneratedDocument.candidate_id==c.id)).all()),
+        "resume_uploads":_rows(db.scalars(select(UploadedFile).where(UploadedFile.candidate_id==c.id)).all(),{"storage_key"}),
+        "resume_suggestions":_rows(db.scalars(select(ResumeSuggestion).where(ResumeSuggestion.candidate_id==c.id)).all()),
+        "document_exports":_rows(db.scalars(select(DocumentExport).where(DocumentExport.candidate_id==c.id)).all()),
         "applications":_rows(db.scalars(select(Application).where(Application.candidate_id==c.id)).all()),
         "interview_sessions":_rows(db.scalars(select(InterviewSession).where(InterviewSession.candidate_id==c.id)).all()),
         "star_answers":_rows(db.scalars(select(STARAnswer).where(STARAnswer.candidate_id==c.id)).all()),

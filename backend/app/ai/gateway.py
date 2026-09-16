@@ -65,11 +65,12 @@ class LiteLLMGateway:
 
         started = time.perf_counter()
 
-        try:
-            with httpx.Client(
-                timeout=self.settings.llm_timeout_seconds
-            ) as client:
-                response = client.post(
+        response = None
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(max(1, self.settings.llm_retry_attempts)):
+            try:
+                with httpx.Client(timeout=self.settings.llm_timeout_seconds) as client:
+                    response = client.post(
                     url,
                     headers={
                         "Authorization":
@@ -78,6 +79,7 @@ class LiteLLMGateway:
                     json={
                         "model": self.settings.litellm_model,
                         "temperature": 0.1,
+                        "max_tokens": self.settings.llm_max_output_tokens,
                         "response_format": {
                             "type": "json_object"
                         },
@@ -97,24 +99,23 @@ class LiteLLMGateway:
                     },
                 )
 
-                response.raise_for_status()
+                    response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if exc.response.status_code < 500 or attempt + 1 >= max(1, self.settings.llm_retry_attempts):
+                    raise LiteLLMResponseError(f"LiteLLM returned HTTP {exc.response.status_code}") from exc
+            except httpx.TimeoutException as exc:
+                last_error = exc
+                if attempt + 1 >= max(1, self.settings.llm_retry_attempts):
+                    raise LiteLLMTimeoutError("LiteLLM request timed out") from exc
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt + 1 >= max(1, self.settings.llm_retry_attempts):
+                    raise LiteLLMResponseError("LiteLLM request failed") from exc
 
-        except httpx.TimeoutException as exc:
-            raise LiteLLMTimeoutError(
-                "LiteLLM request timed out"
-            ) from exc
-
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-
-            raise LiteLLMResponseError(
-                f"LiteLLM returned HTTP {status}"
-            ) from exc
-
-        except httpx.HTTPError as exc:
-            raise LiteLLMResponseError(
-                "LiteLLM request failed"
-            ) from exc
+        if response is None:
+            raise LiteLLMResponseError("LiteLLM request failed") from last_error
 
         latency_ms = int(
             (time.perf_counter() - started) * 1000

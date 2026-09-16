@@ -45,13 +45,23 @@ def run_task(task_id: uuid.UUID) -> None:
             elif task.kind == "document_generate":
                 from app.domains.documents.service import process_document_generate_task
                 process_document_generate_task(db, task)
+            elif task.kind == "resume_suggestions":
+                from app.domains.resume_studio.service import process_suggestion_task
+                process_suggestion_task(db, task)
             else:
                 update_task(db,task,status="failed",progress=100,error_code="unknown_task_type")
         except Exception:
             # Do not persist exception text; it may contain resume/job PII or provider secrets.
             db.rollback()
             task=db.get(AsyncJob,task_id)
-            if task: update_task(db,task,status="failed",progress=100,error_code="task_failed")
+            if task:
+                if task.kind == "resume_parse" and task.payload.get("file_id"):
+                    from app.models.entities import UploadedFile
+                    record=db.get(UploadedFile,uuid.UUID(task.payload["file_id"]))
+                    if record:
+                        record.processing_status="failed"
+                        record.extraction_error="task_failed"
+                update_task(db,task,status="failed",progress=100,error_code="task_failed")
     finally:
         db.close()
 
@@ -59,7 +69,12 @@ def run_task(task_id: uuid.UUID) -> None:
 def claim_and_run_one() -> bool:
     db=SessionLocal()
     try:
-        task=db.scalar(select(AsyncJob).where(AsyncJob.status=="queued").order_by(AsyncJob.created_at).limit(1))
+        stmt=select(AsyncJob).where(AsyncJob.status=="queued").order_by(AsyncJob.created_at).limit(1)
+        # PostgreSQL workers atomically skip rows already claimed by another worker.
+        # SQLite (tests/local fallback) serializes writes and does not support SKIP LOCKED.
+        if db.bind and db.bind.dialect.name == "postgresql":
+            stmt=stmt.with_for_update(skip_locked=True)
+        task=db.scalar(stmt)
         if not task: return False
         task.status="running"; task.started_at=datetime.now(UTC); task.progress=5; db.commit(); tid=task.id
     finally:
