@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.core.security import require_verified_user
 from app.domains.jobs.service import get_job_for_user
 from app.domains.tasks.service import create_task, dispatch_task
-from app.models.entities import GeneratedDocument, JobPosting, User
+from app.models.entities import AuditLog, DocumentExport, GeneratedDocument, JobPosting, User
 from app.repositories.common import candidate_for_user, owned_or_404
 from app.schemas.common import success
 from .schemas import DocumentEditRequest, GenerateDocumentRequest
@@ -54,4 +54,7 @@ def download(document_id:uuid.UUID,format:Literal["pdf","docx"]=Query("pdf"),use
     if not d.approved_at: raise HTTPException(status_code=409,detail="Document must be approved before export")
     if d.claim_report.get("unsupported_claims",0): raise HTTPException(status_code=409,detail="Document contains unsupported claims")
     data=export_pdf_bytes(d) if format=="pdf" else export_docx_bytes(d);media="application/pdf" if format=="pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document";safe="".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in d.title)[:80]
+    db.add(DocumentExport(candidate_id=c.id,document_id=d.id,format=format,template_key=d.template_key))
+    db.add(AuditLog(user_id=user.id,action="document.exported",resource_type="generated_document",resource_id=str(d.id),metadata_json={"format":format,"template":d.template_key}))
+    db.commit()
     return StreamingResponse(io.BytesIO(data),media_type=media,headers={"Content-Disposition":f'attachment; filename="{safe}.{format}"',"Cache-Control":"private, no-store"})

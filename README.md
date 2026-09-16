@@ -82,6 +82,31 @@ Terminate it without deleting persistent volumes:
 docker compose --env-file .env.production -f docker-compose.production.yml down
 ```
 
+## AI Resume Studio
+
+Authenticated candidates can open `/dashboard/resume-studio` to upload versioned PDF/DOCX resumes, review unverified extracted facts, request grounded AI suggestions, target a saved or pasted job, generate resume and cover-letter drafts, choose an ATS/Modern/Minimal/Professional template, approve claim-safe versions, and export PDF or DOCX.
+
+Uploads are content-validated and stored under private per-candidate object keys. `UPLOAD_MAX_BYTES` controls the upload limit. Production uses the configured private S3/MinIO bucket; storage keys are never returned by the API. Extraction, suggestions, and generation use the existing task worker. Database workers claim PostgreSQL tasks with `FOR UPDATE SKIP LOCKED`.
+
+Apply database migrations before deploying a separately managed API process:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+The backend Docker image performs this migration automatically before starting the API. Configure AI access with `LITELLM_BASE_URL`, `LITELLM_API_KEY`, and `LITELLM_MODEL`. Direct OpenAI access uses `https://api.openai.com/v1`; keys remain backend-only. `LLM_TIMEOUT_SECONDS`, `LLM_MAX_OUTPUT_TOKENS`, `LLM_RETRY_ATTEMPTS`, and `LLM_MAX_COST_USD_PER_REQUEST` bound calls.
+
+Verification commands:
+
+```bash
+cd backend && python -m pytest -q
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
 ## Scope deliberately excluded
 
 Recruiter marketplace, referral agent screens, and voice/video interview UI.

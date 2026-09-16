@@ -474,6 +474,7 @@ def generate_document(
             if match
             else None
         ),
+        template_key=template,
     )
 
     db.add(document)
@@ -531,6 +532,12 @@ def process_document_generate_task(
             ),
         )
 
+        if task.payload.get("source_file_id"):
+            document.source_file_id = uuid.UUID(task.payload["source_file_id"])
+        if task.payload.get("source_document_id"):
+            document.source_document_id = uuid.UUID(task.payload["source_document_id"])
+        db.commit()
+
     except HTTPException:
         update_task(
             db,
@@ -576,6 +583,9 @@ def document_dict(
         "content": doc.content,
         "claim_report": doc.claim_report,
         "generator": doc.generator,
+        "template_key": doc.template_key,
+        "source_file_id": str(doc.source_file_id) if doc.source_file_id else None,
+        "source_document_id": str(doc.source_document_id) if doc.source_document_id else None,
         "match_before": doc.match_before,
         "match_after": doc.match_after,
         "approved_at": (
@@ -639,6 +649,9 @@ def create_edited_version(
         generator="candidate-edited",
         match_before=source.match_before,
         match_after=source.match_after,
+        template_key=source.template_key,
+        source_file_id=source.source_file_id,
+        source_document_id=source.id,
     )
 
     db.add(document)

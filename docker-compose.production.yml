@@ -33,6 +33,7 @@ services:
       LITELLM_BASE_URL: ${LITELLM_BASE_URL:?Set LITELLM_BASE_URL}
       LITELLM_API_KEY: ${LITELLM_API_KEY:?Set LITELLM_API_KEY}
       LITELLM_MODEL: ${LITELLM_MODEL:?Set LITELLM_MODEL}
+      TASK_MODE: database
       CORS_ORIGINS: '["${NEXT_PUBLIC_API_ORIGIN:?Set NEXT_PUBLIC_API_ORIGIN}"]'
     restart: unless-stopped
     ports:
@@ -70,6 +71,7 @@ services:
       LITELLM_BASE_URL: ${LITELLM_BASE_URL:?Set LITELLM_BASE_URL}
       LITELLM_API_KEY: ${LITELLM_API_KEY:?Set LITELLM_API_KEY}
       LITELLM_MODEL: ${LITELLM_MODEL:?Set LITELLM_MODEL}
+      TASK_MODE: database
     command: ["python", "-m", "app.worker"]
     restart: unless-stopped
     depends_on:

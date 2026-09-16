@@ -189,6 +189,9 @@ class GeneratedDocument(Base, TimestampMixin):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_key_pdf: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_key_docx: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_key: Mapped[str] = mapped_column(String(64), default="ats", nullable=False)
+    source_file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("uploaded_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_documents.id", ondelete="SET NULL"), nullable=True)
 
 
 class Application(Base, TimestampMixin):
@@ -359,6 +362,37 @@ class UploadedFile(Base, TimestampMixin):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False, index=True)
+    extraction_error: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class ResumeSuggestion(Base, TimestampMixin):
+    __tablename__ = "resume_suggestions"
+    __table_args__ = (Index("ix_resume_suggestions_candidate_status", "candidate_id", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_file_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("uploaded_files.id", ondelete="CASCADE"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    priority: Mapped[str] = mapped_column(String(16), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    current_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    suggested_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    applied_document_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("generated_documents.id", ondelete="SET NULL"), nullable=True)
+
+
+class DocumentExport(Base):
+    __tablename__ = "document_exports"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("generated_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    format: Mapped[str] = mapped_column(String(8), nullable=False)
+    template_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class AsyncJob(Base, TimestampMixin):
