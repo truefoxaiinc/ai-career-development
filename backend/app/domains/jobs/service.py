@@ -625,6 +625,10 @@ def discover_for_candidate(
             continue
 
         provider_count = 0
+        provider_discovered: dict[
+            uuid.UUID,
+            JobPosting,
+        ] = {}
 
         try:
             for title in titles:
@@ -641,10 +645,15 @@ def discover_for_candidate(
                             provider_job,
                         )
                         db.flush()
-                        discovered[job.id] = job
+                        provider_discovered[
+                            job.id
+                        ] = job
                         provider_count += 1
 
             db.commit()
+            discovered.update(
+                provider_discovered
+            )
 
             provider_status[name] = {
                 "enabled": True,
