@@ -1331,25 +1331,107 @@ export function PreferencesPage() {
     );
 
 
+  const [
+    arrayFields,
+    setArrayFields,
+  ] = useState({
+    target_titles: '',
+    industries: '',
+    experience_levels: '',
+    preferred_companies: '',
+    locations: '',
+    work_modes: '',
+    employment_types: '',
+  });
+
+
   useEffect(() => {
     if (q.data) {
       setForm(q.data);
+
+      setArrayFields({
+        target_titles:
+          q.data.target_titles.join(', '),
+        industries:
+          q.data.industries.join(', '),
+        experience_levels:
+          q.data.experience_levels.join(', '),
+        preferred_companies:
+          q.data.preferred_companies.join(', '),
+        locations:
+          q.data.locations.join(', '),
+        work_modes:
+          q.data.work_modes.join(', '),
+        employment_types:
+          q.data.employment_types.join(', '),
+      });
     }
   }, [q.data]);
 
 
   const save = useMutation({
-    mutationFn: () =>
-      api.put<Preferences>(
+    mutationFn: () => {
+      if (!form) {
+        throw new Error(
+          'Preferences are not ready',
+        );
+      }
+
+      const payload: Preferences = {
+        ...form,
+        target_titles: split(
+          arrayFields.target_titles,
+        ),
+        industries: split(
+          arrayFields.industries,
+        ),
+        experience_levels: split(
+          arrayFields.experience_levels,
+        ),
+        preferred_companies: split(
+          arrayFields.preferred_companies,
+        ),
+        locations: split(
+          arrayFields.locations,
+        ),
+        work_modes: split(
+          arrayFields.work_modes,
+        ),
+        employment_types: split(
+          arrayFields.employment_types,
+        ),
+      };
+
+      return api.put<Preferences>(
         '/preferences',
-        form!,
-      ),
+        payload,
+      );
+    },
 
     onSuccess: (data) => {
       client.setQueryData(
         ['preferences'],
         data,
       );
+
+      setForm(data);
+
+      setArrayFields({
+        target_titles:
+          data.target_titles.join(', '),
+        industries:
+          data.industries.join(', '),
+        experience_levels:
+          data.experience_levels.join(', '),
+        preferred_companies:
+          data.preferred_companies.join(', '),
+        locations:
+          data.locations.join(', '),
+        work_modes:
+          data.work_modes.join(', '),
+        employment_types:
+          data.employment_types.join(', '),
+      });
 
       push(
         'Job preferences saved',
@@ -1385,23 +1467,24 @@ export function PreferencesPage() {
   }
 
 
-  const text = (
-    value: string[],
-  ) => value.join(', ');
-
-
-  const updateArray = (
-    key: keyof Preferences,
+  function updateTextField(
+    key:
+      | 'target_titles'
+      | 'industries'
+      | 'experience_levels'
+      | 'preferred_companies'
+      | 'locations'
+      | 'work_modes'
+      | 'employment_types',
     value: string,
-  ) =>
-    setForm((current) =>
-      current
-        ? {
-            ...current,
-            [key]: split(value),
-          }
-        : current,
+  ) {
+    setArrayFields(
+      (current) => ({
+        ...current,
+        [key]: value,
+      }),
     );
+  }
 
 
   function submit(
@@ -1446,11 +1529,11 @@ export function PreferencesPage() {
             hint="Separate multiple values with commas."
           >
             <Input
-              value={text(
-                form.target_titles,
-              )}
+              value={
+                arrayFields.target_titles
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'target_titles',
                   e.target.value,
                 )
@@ -1465,11 +1548,11 @@ export function PreferencesPage() {
             label="Industries"
           >
             <Input
-              value={text(
-                form.industries,
-              )}
+              value={
+                arrayFields.industries
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'industries',
                   e.target.value,
                 )
@@ -1484,11 +1567,11 @@ export function PreferencesPage() {
             label="Experience levels"
           >
             <Input
-              value={text(
-                form.experience_levels,
-              )}
+              value={
+                arrayFields.experience_levels
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'experience_levels',
                   e.target.value,
                 )
@@ -1503,11 +1586,11 @@ export function PreferencesPage() {
             label="Preferred companies"
           >
             <Input
-              value={text(
-                form.preferred_companies,
-              )}
+              value={
+                arrayFields.preferred_companies
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'preferred_companies',
                   e.target.value,
                 )
@@ -1528,11 +1611,11 @@ export function PreferencesPage() {
         >
           <PreferenceField label="Preferred locations">
             <Input
-              value={text(
-                form.locations,
-              )}
+              value={
+                arrayFields.locations
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'locations',
                   e.target.value,
                 )
@@ -1545,11 +1628,11 @@ export function PreferencesPage() {
 
           <PreferenceField label="Work modes">
             <Input
-              value={text(
-                form.work_modes,
-              )}
+              value={
+                arrayFields.work_modes
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'work_modes',
                   e.target.value,
                 )
@@ -1562,11 +1645,11 @@ export function PreferencesPage() {
 
           <PreferenceField label="Employment types">
             <Input
-              value={text(
-                form.employment_types,
-              )}
+              value={
+                arrayFields.employment_types
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'employment_types',
                   e.target.value,
                 )
