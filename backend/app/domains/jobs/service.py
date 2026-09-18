@@ -562,6 +562,205 @@ def refresh_from_configured_providers(
     return summary
 
 
+def discover_for_candidate(
+    db: Session,
+    user: User,
+    settings: Settings,
+    limit_per_provider: int = 20,
+    max_results: int = 50,
+) -> dict:
+    candidate, _, preference = _candidate_evidence(
+        db,
+        user,
+    )
+
+    if (
+        not preference
+        or not preference.target_titles
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Set at least one target job title "
+                "in Job Preferences before discovering jobs."
+            ),
+        )
+
+    titles = [
+        title.strip()
+        for title in preference.target_titles[:5]
+        if title.strip()
+    ]
+
+    locations = [
+        location.strip()
+        for location in preference.locations[:3]
+        if location.strip()
+    ]
+
+    if not locations:
+        locations = [
+            candidate.location.strip()
+            if candidate.location
+            else ""
+        ]
+
+    discovered: dict[uuid.UUID, JobPosting] = {}
+    provider_status: dict[str, dict[str, Any]] = {}
+
+    for provider in configured_providers(
+        settings
+    ):
+        name = getattr(
+            provider,
+            "name",
+            provider.__class__.__name__,
+        )
+
+        if not provider.enabled():
+            provider_status[name] = {
+                "enabled": False,
+                "count": 0,
+            }
+            continue
+
+        provider_count = 0
+        provider_discovered: dict[
+            uuid.UUID,
+            JobPosting,
+        ] = {}
+
+        try:
+            for title in titles:
+                for location in locations:
+                    provider_jobs = provider.search(
+                        title,
+                        location,
+                        limit_per_provider,
+                    )
+
+                    for provider_job in provider_jobs:
+                        job = ingest_provider_job(
+                            db,
+                            provider_job,
+                        )
+                        db.flush()
+                        provider_discovered[
+                            job.id
+                        ] = job
+                        provider_count += 1
+
+            db.commit()
+            discovered.update(
+                provider_discovered
+            )
+
+            provider_status[name] = {
+                "enabled": True,
+                "count": provider_count,
+                "status": "ok",
+            }
+
+        except Exception:
+            db.rollback()
+            provider_status[name] = {
+                "enabled": True,
+                "count": 0,
+                "status": "error",
+            }
+
+    ranked = []
+
+    for job in discovered.values():
+        match = calculate_match(
+            db,
+            user,
+            job,
+            settings,
+        )
+
+        ranked.append(
+            {
+                **_job_dict(job),
+                "match": match_dict(
+                    match,
+                    job,
+                ),
+            }
+        )
+
+    ranked.sort(
+        key=lambda item: item["match"]["score"],
+        reverse=True,
+    )
+
+    return {
+        "providers": provider_status,
+        "found": len(discovered),
+        "items": ranked[:max_results],
+    }
+
+
+def process_job_discovery_task(
+    db: Session,
+    task,
+) -> None:
+    user = db.get(
+        User,
+        task.user_id,
+    )
+
+    if not user:
+        task.status = "failed"
+        task.progress = 100
+        task.error_code = "user_not_found"
+        db.commit()
+        return
+
+    payload = task.payload or {}
+
+    try:
+        result = discover_for_candidate(
+            db=db,
+            user=user,
+            settings=get_settings(),
+            limit_per_provider=int(
+                payload.get(
+                    "limit_per_provider",
+                    20,
+                )
+            ),
+            max_results=int(
+                payload.get(
+                    "max_results",
+                    50,
+                )
+            ),
+        )
+    except HTTPException as exc:
+        task.status = "failed"
+        task.progress = 100
+        task.error_code = (
+            "preferences_required"
+            if exc.status_code == 422
+            else "job_discovery_failed"
+        )
+        task.result = {}
+        db.commit()
+        return
+
+    task.status = "succeeded"
+    task.progress = 100
+    task.result = {
+        "found": result["found"],
+        "providers": result["providers"],
+        "recommendation_count": len(
+            result["items"]
+        ),
+    }
+    db.commit()
+
+
 def create_manual_job(
     db: Session,
     user: User,

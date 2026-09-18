@@ -62,6 +62,7 @@ import {
 } from '@/components/ui';
 
 import {
+  useDiscoverJobs,
   useJobs,
   useRecommendations,
   useSavedJobs,
@@ -478,6 +479,39 @@ export function RecommendationsPage() {
   const q =
     useRecommendations();
 
+  const discover =
+    useDiscoverJobs();
+
+  const client =
+    useQueryClient();
+
+  const { push } =
+    useToast();
+
+  async function refreshOpportunities() {
+    try {
+      const task =
+        await discover.mutateAsync();
+
+      await client.invalidateQueries({
+        queryKey: ['jobs'],
+      });
+
+      const found =
+        Number(
+          task.result?.found ?? 0,
+        ) || 0;
+
+      push(
+        found
+          ? `Discovered ${found} matching jobs`
+          : 'Discovery finished with no new matching jobs',
+      );
+    } catch (error) {
+      push(err(error));
+    }
+  }
+
   const strongCount =
     q.data?.filter(
       (job) =>
@@ -493,14 +527,26 @@ export function RecommendationsPage() {
         title="Opportunities picked for you"
         description="CareerPilot ranks roles using your verified experience, education, skills, and preferences — not just keywords."
         actions={
-          <Link href="/dashboard/preferences">
-            <Button variant="secondary">
-              <SlidersHorizontal
-                size={14}
-              />
-              Tune preferences
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={refreshOpportunities}
+              disabled={discover.isPending}
+            >
+              <Sparkles size={14} />
+              {discover.isPending
+                ? 'Finding jobs...'
+                : 'Find new jobs'}
             </Button>
-          </Link>
+
+            <Link href="/dashboard/preferences">
+              <Button variant="secondary">
+                <SlidersHorizontal
+                  size={14}
+                />
+                Tune preferences
+              </Button>
+            </Link>
+          </div>
         }
       />
 
