@@ -48,6 +48,9 @@ def run_task(task_id: uuid.UUID) -> None:
             elif task.kind == "resume_suggestions":
                 from app.domains.resume_studio.service import process_suggestion_task
                 process_suggestion_task(db, task)
+            elif task.kind == "job_discovery":
+                from app.domains.jobs.service import process_job_discovery_task
+                process_job_discovery_task(db, task)
             else:
                 update_task(db,task,status="failed",progress=100,error_code="unknown_task_type")
         except Exception:
