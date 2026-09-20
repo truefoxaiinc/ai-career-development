@@ -99,11 +99,23 @@ class JobPreference(Base, TimestampMixin):
     target_titles: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     industries: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     locations: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
+    # Global job-search preferences.
+    preferred_countries: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    job_categories: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
+    # remote / hybrid / onsite. An empty list means no work-mode restriction.
     work_modes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
     salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     employment_types: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
+    # Overseas-job preferences.
+    visa_sponsorship_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     relocation_willing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    work_authorizations: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
     experience_levels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     preferred_companies: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     alert_frequency: Mapped[str] = mapped_column(String(32), default="weekly", nullable=False)
@@ -122,14 +134,34 @@ class JobPosting(Base, TimestampMixin):
     external_id: Mapped[str] = mapped_column(String(300), nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
     company: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+
+    # Keep the provider's display location while also storing normalized geography.
     location: Mapped[str] = mapped_column(String(300), default="", nullable=False)
-    remote_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    country: Mapped[str] = mapped_column(String(120), default="", nullable=False, index=True)
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+
+    # Generic classification fields so CareerPilot is not tied to IT roles.
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    occupation: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+
+    # remote / hybrid / onsite when the provider can determine it.
+    remote_mode: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+
     description: Mapped[str] = mapped_column(Text, nullable=False)
     requirements: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
     salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     employment_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Nullable on purpose: many external providers do not disclose these details.
+    # None means unknown; False should only mean explicitly "no".
+    visa_sponsorship: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    relocation_support: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    work_authorization: Mapped[str | None] = mapped_column(String(250), nullable=True)
+
     apply_url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   FormEvent,
   ReactNode,
-  useDeferredValue,
+  useEffect,
   useState,
 } from 'react';
 
@@ -64,6 +64,7 @@ import {
 import {
   useDiscoverJobs,
   useJobs,
+  useJobSources,
   useRecommendations,
   useSavedJobs,
 } from '@/hooks/useJobs';
@@ -78,6 +79,32 @@ const err = (error: unknown) =>
   error instanceof Error
     ? error.message
     : 'Request failed';
+
+function useDebouncedValue<T>(
+  value: T,
+  delay = 400,
+) {
+  const [
+    debouncedValue,
+    setDebouncedValue,
+  ] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => {
+        setDebouncedValue(value);
+      },
+      delay,
+    );
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 
 const cleanText = (value?: string | null) =>
   value
@@ -689,10 +716,16 @@ export function JobSearchPage() {
     useState(false);
 
   const deferredQuery =
-    useDeferredValue(query);
+    useDebouncedValue(
+      query,
+      400,
+    );
 
   const deferredLocation =
-    useDeferredValue(location);
+    useDebouncedValue(
+      location,
+      400,
+    );
 
   const jobs = useJobs({
     q: deferredQuery,
@@ -701,6 +734,9 @@ export function JobSearchPage() {
     sort,
     page,
   });
+
+  const sources =
+    useJobSources();
 
   const client =
     useQueryClient();
@@ -1003,18 +1039,35 @@ export function JobSearchPage() {
           </SearchField>
 
           <SearchField label="Source">
-            <Input
-              value={source}
-              onChange={(e) => {
-                setSource(
-                  e.target.value,
-                );
-                setPage(1);
-              }}
-              placeholder="Adzuna"
-              className="h-12"
-            />
-          </SearchField>
+  <Select
+    className="h-12"
+    value={source}
+    onChange={(e) => {
+      setSource(
+        e.target.value,
+      );
+
+      setPage(1);
+    }}
+  >
+    <option value="">
+      All sources
+    </option>
+
+    {sources.data?.map(
+      (provider) => (
+        <option
+          key={provider}
+          value={provider}
+        >
+          {formatSource(
+            provider,
+          )}
+        </option>
+      ),
+    )}
+  </Select>
+</SearchField>
 
           <SearchField label="Sort by">
             <Select
@@ -1110,8 +1163,8 @@ export function JobSearchPage() {
       ) : !jobs.data?.items
           .length ? (
         <EmptyState
-          title="No jobs match these filters"
-          description="Try broader keywords, another location, or remove one of the active filters."
+          title="No imported jobs match these filters"
+          description="Search filters jobs already collected into CareerPilot. Use For you → Find new jobs first, then try a city such as Kochi or Bengaluru instead of a country-wide location."
         />
       ) : (
         <>
