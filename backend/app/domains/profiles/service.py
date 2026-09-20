@@ -238,6 +238,7 @@ def calculate_completion(
                 "achievement",
                 "project",
                 "certification",
+                "license",
             }
         )
         else 0

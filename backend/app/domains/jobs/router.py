@@ -79,6 +79,18 @@ router = APIRouter(
 def search(
     q: str = "",
     location: str = "",
+    country: str = "",
+    category: str = "",
+    work_mode: str = "",
+    employment_type: str = "",
+    salary_min: int | None = Query(
+        None,
+        ge=0,
+    ),
+    currency: str = "",
+    visa_sponsorship: bool | None = None,
+    relocation_support: bool | None = None,
+    work_authorization: str = "",
     source: str = "",
     sort: Literal[
         "recent",
@@ -106,17 +118,33 @@ def search(
 ):
     return success(
         search_jobs(
-            db,
-            user,
-            q,
-            location,
-            source,
-            sort,
-            page,
-            page_size,
+            db=db,
+            user=user,
+            q=q,
+            location=location,
+            source=source,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+            country=country,
+            category=category,
+            work_mode=work_mode,
+            employment_type=(
+                employment_type
+            ),
+            salary_min=salary_min,
+            currency=currency,
+            visa_sponsorship=(
+                visa_sponsorship
+            ),
+            relocation_support=(
+                relocation_support
+            ),
+            work_authorization=(
+                work_authorization
+            ),
         )
     )
-
 
 @router.get("/sources")
 def sources(

@@ -59,13 +59,92 @@ def verify(payload:VerificationRequest,user:Annotated[User,Depends(require_verif
 def analysis(user:Annotated[User,Depends(require_verified_user)],db:Annotated[Session,Depends(get_db)]): return success(profile_analysis(db,user))
 
 @router.get("/preferences")
-def get_preferences(user:Annotated[User,Depends(require_verified_user)],db:Annotated[Session,Depends(get_db)]):
-    c=candidate_for_user(db,user); p=db.scalar(select(JobPreference).where(JobPreference.candidate_id==c.id))
-    if not p: return success({"target_titles":[],"industries":[],"locations":[],"work_modes":[],"salary_min":None,"salary_currency":None,"employment_types":[],"relocation_willing":False,"experience_levels":[],"preferred_companies":[],"alert_frequency":"weekly"})
-    return success({k:getattr(p,k) for k in JobPreferencePayload.model_fields})
+def get_preferences(
+    user: Annotated[
+        User,
+        Depends(require_verified_user),
+    ],
+    db: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+):
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    preference = db.scalar(
+        select(JobPreference).where(
+            JobPreference.candidate_id
+            == candidate.id
+        )
+    )
+
+    if not preference:
+        return success(
+            JobPreferencePayload().model_dump()
+        )
+
+    return success(
+        {
+            key: getattr(
+                preference,
+                key,
+            )
+            for key
+            in JobPreferencePayload.model_fields
+        }
+    )
 
 @router.put("/preferences")
-def put_preferences(payload:JobPreferencePayload,user:Annotated[User,Depends(require_verified_user)],db:Annotated[Session,Depends(get_db)]):
-    c=candidate_for_user(db,user); p=db.scalar(select(JobPreference).where(JobPreference.candidate_id==c.id)) or JobPreference(candidate_id=c.id)
-    for k,v in payload.model_dump().items(): setattr(p,k,v)
-    db.add(p); db.commit(); return success({k:getattr(p,k) for k in JobPreferencePayload.model_fields})
+def put_preferences(
+    payload: JobPreferencePayload,
+    user: Annotated[
+        User,
+        Depends(require_verified_user),
+    ],
+    db: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+):
+    candidate = candidate_for_user(
+        db,
+        user,
+    )
+
+    preference = db.scalar(
+        select(JobPreference).where(
+            JobPreference.candidate_id
+            == candidate.id
+        )
+    )
+
+    if not preference:
+        preference = JobPreference(
+            candidate_id=candidate.id
+        )
+
+    for key, value in payload.model_dump().items():
+        setattr(
+            preference,
+            key,
+            value,
+        )
+
+    db.add(preference)
+    db.commit()
+    db.refresh(preference)
+
+    return success(
+        {
+            key: getattr(
+                preference,
+                key,
+            )
+            for key
+            in JobPreferencePayload.model_fields
+        }
+    )
+

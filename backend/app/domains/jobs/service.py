@@ -450,10 +450,87 @@ def ingest_provider_job(
         )
     )
 
+    country = str(
+        getattr(
+            pj,
+            "country",
+            "",
+        )
+        or ""
+    ).strip()[:120]
+
+    raw_country_code = str(
+        getattr(
+            pj,
+            "country_code",
+            "",
+        )
+        or ""
+    ).strip().upper()
+
+    country_code = (
+        raw_country_code[:2]
+        if raw_country_code
+        else None
+    )
+
+    raw_city = str(
+        getattr(
+            pj,
+            "city",
+            "",
+        )
+        or ""
+    ).strip()
+
+    raw_category = str(
+        getattr(
+            pj,
+            "category",
+            "",
+        )
+        or ""
+    ).strip()
+
+    raw_occupation = str(
+        getattr(
+            pj,
+            "occupation",
+            "",
+        )
+        or ""
+    ).strip()
+
+    raw_work_authorization = str(
+        getattr(
+            pj,
+            "work_authorization",
+            "",
+        )
+        or ""
+    ).strip()
+
     payload = {
         "title": pj.title[:300],
         "company": pj.company[:300],
         "location": pj.location[:300],
+        "country": country,
+        "country_code": country_code,
+        "city": (
+            raw_city[:160]
+            if raw_city
+            else None
+        ),
+        "category": (
+            raw_category[:120]
+            if raw_category
+            else None
+        ),
+        "occupation": (
+            raw_occupation[:180]
+            if raw_occupation
+            else None
+        ),
         "description": isolate_untrusted_text(
             pj.description
         ),
@@ -464,6 +541,21 @@ def ingest_provider_job(
         "salary_max": pj.salary_max,
         "salary_currency": pj.salary_currency,
         "employment_type": pj.employment_type,
+        "visa_sponsorship": getattr(
+            pj,
+            "visa_sponsorship",
+            None,
+        ),
+        "relocation_support": getattr(
+            pj,
+            "relocation_support",
+            None,
+        ),
+        "work_authorization": (
+            raw_work_authorization[:250]
+            if raw_work_authorization
+            else None
+        ),
         "posted_at": pj.posted_at,
         "ingestion_meta": {
             **pj.raw_meta,
@@ -576,37 +668,79 @@ def discover_for_candidate(
 
     if (
         not preference
-        or not preference.target_titles
+        or (
+            not preference.target_titles
+            and not preference.job_categories
+        )
     ):
         raise HTTPException(
             status_code=422,
             detail=(
                 "Set at least one target job title "
-                "in Job Preferences before discovering jobs."
+                "or job category in Job Preferences "
+                "before discovering jobs."
             ),
         )
 
-    titles = [
-        title.strip()
-        for title in preference.target_titles[:5]
-        if title.strip()
-    ]
+    search_queries: list[str] = []
 
-    locations = [
-        location.strip()
-        for location in preference.locations[:3]
-        if location.strip()
-    ]
+    for value in [
+        *preference.target_titles,
+        *preference.job_categories,
+    ]:
+        cleaned = str(value or "").strip()
 
-    if not locations:
-        locations = [
+        if (
+            cleaned
+            and cleaned.casefold()
+            not in {
+                item.casefold()
+                for item in search_queries
+            }
+        ):
+            search_queries.append(cleaned)
+
+    search_queries = search_queries[:5]
+
+    # Search explicit cities/locations first, then preferred countries.
+    # This keeps the provider contract unchanged while allowing global
+    # discovery preferences to influence provider searches.
+    search_locations: list[str] = []
+
+    for value in [
+        *preference.locations[:3],
+        *preference.preferred_countries[:3],
+    ]:
+        cleaned = str(value or "").strip()
+
+        if (
+            cleaned
+            and cleaned.casefold()
+            not in {
+                item.casefold()
+                for item in search_locations
+            }
+        ):
+            search_locations.append(cleaned)
+
+    if not search_locations:
+        search_locations = [
             candidate.location.strip()
             if candidate.location
             else ""
         ]
 
-    discovered: dict[uuid.UUID, JobPosting] = {}
-    provider_status: dict[str, dict[str, Any]] = {}
+    search_locations = search_locations[:5]
+
+    discovered: dict[
+        uuid.UUID,
+        JobPosting,
+    ] = {}
+
+    provider_status: dict[
+        str,
+        dict[str, Any],
+    ] = {}
 
     for provider in configured_providers(
         settings
@@ -631,8 +765,8 @@ def discover_for_candidate(
         ] = {}
 
         try:
-            for title in titles:
-                for location in locations:
+            for title in search_queries:
+                for location in search_locations:
                     provider_jobs = provider.search(
                         title,
                         location,
@@ -645,12 +779,15 @@ def discover_for_candidate(
                             provider_job,
                         )
                         db.flush()
+
                         provider_discovered[
                             job.id
                         ] = job
+
                         provider_count += 1
 
             db.commit()
+
             discovered.update(
                 provider_discovered
             )
@@ -663,6 +800,7 @@ def discover_for_candidate(
 
         except Exception:
             db.rollback()
+
             provider_status[name] = {
                 "enabled": True,
                 "count": 0,
@@ -690,7 +828,9 @@ def discover_for_candidate(
         )
 
     ranked.sort(
-        key=lambda item: item["match"]["score"],
+        key=lambda item: item[
+            "match"
+        ]["score"],
         reverse=True,
     )
 
@@ -792,8 +932,11 @@ def create_manual_job(
         db.scalars(
             select(JobPosting)
             .where(
-                JobPosting.source == "candidate_input",
-                JobPosting.is_active.is_(True),
+                JobPosting.source
+                == "candidate_input",
+                JobPosting.is_active.is_(
+                    True
+                ),
                 _candidate_owner_filter(
                     db,
                     candidate.id,
@@ -806,7 +949,10 @@ def create_manual_job(
         )
     )
 
-    matching_jobs: list[JobPosting] = []
+    matching_jobs: list[
+        JobPosting
+    ] = []
+
     metadata_changed = False
 
     for existing in existing_jobs:
@@ -842,8 +988,7 @@ def create_manual_job(
             existing
         )
 
-        # Backfill fingerprints on legacy rows. This does not change
-        # ownership or any downstream relationship.
+        # Backfill fingerprints on legacy rows.
         if (
             existing_meta.get(
                 "dedupe_fingerprint"
@@ -865,15 +1010,13 @@ def create_manual_job(
         if metadata_changed:
             db.commit()
 
-        # Prefer the duplicate that is already carrying the real workflow:
-        # application -> documents -> interviews -> saved -> matches.
-        # This avoids switching canonical identity merely because another
-        # duplicate happened to be created earlier.
         canonical = max(
             matching_jobs,
-            key=lambda job: _job_reference_priority(
-                db,
-                job,
+            key=lambda job: (
+                _job_reference_priority(
+                    db,
+                    job,
+                )
             ),
         )
 
@@ -892,6 +1035,38 @@ def create_manual_job(
         description=description,
     )
 
+    country = payload.country.strip()
+
+    country_code = (
+        payload.country_code.strip().upper()
+        if payload.country_code
+        else None
+    )
+
+    city = (
+        payload.city.strip()
+        if payload.city
+        else None
+    )
+
+    category = (
+        payload.category.strip()
+        if payload.category
+        else None
+    )
+
+    occupation = (
+        payload.occupation.strip()
+        if payload.occupation
+        else None
+    )
+
+    work_authorization = (
+        payload.work_authorization.strip()
+        if payload.work_authorization
+        else None
+    )
+
     job = JobPosting(
         source="candidate_input",
         external_id=str(
@@ -900,15 +1075,42 @@ def create_manual_job(
         title=title,
         company=company,
         location=location,
+        country=country,
+        country_code=country_code,
+        city=city,
+        category=category,
+        occupation=occupation,
+        remote_mode=payload.remote_mode,
         description=description,
         requirements=requirements,
+        salary_min=payload.salary_min,
+        salary_max=payload.salary_max,
+        salary_currency=(
+            payload.salary_currency
+        ),
+        employment_type=(
+            payload.employment_type
+        ),
+        visa_sponsorship=(
+            payload.visa_sponsorship
+        ),
+        relocation_support=(
+            payload.relocation_support
+        ),
+        work_authorization=(
+            work_authorization
+        ),
         apply_url=payload.apply_url.strip(),
         ingestion_meta={
             "candidate_id": str(
                 candidate.id
             ),
-            "requirements_method": requirements_method,
-            "ai_fallback_reason": ai_fallback_reason,
+            "requirements_method": (
+                requirements_method
+            ),
+            "ai_fallback_reason": (
+                ai_fallback_reason
+            ),
             "prompt_injection_flags": len(
                 detect_prompt_injection(
                     description
@@ -940,14 +1142,34 @@ def _job_dict(
         "title": job.title,
         "company": job.company,
         "location": job.location,
+        "country": job.country,
+        "country_code": (
+            job.country_code
+        ),
+        "city": job.city,
+        "category": job.category,
+        "occupation": (
+            job.occupation
+        ),
         "remote_mode": job.remote_mode,
         "description": job.description,
         "requirements": job.requirements,
         "salary_min": job.salary_min,
         "salary_max": job.salary_max,
-        "salary_currency": job.salary_currency,
+        "salary_currency": (
+            job.salary_currency
+        ),
         "employment_type": (
             job.employment_type
+        ),
+        "visa_sponsorship": (
+            job.visa_sponsorship
+        ),
+        "relocation_support": (
+            job.relocation_support
+        ),
+        "work_authorization": (
+            job.work_authorization
         ),
         "apply_url": job.apply_url,
         "posted_at": (
@@ -975,6 +1197,15 @@ def search_jobs(
     sort: str = "recent",
     page: int = 1,
     page_size: int = 20,
+    country: str = "",
+    category: str = "",
+    work_mode: str = "",
+    employment_type: str = "",
+    salary_min: int | None = None,
+    currency: str = "",
+    visa_sponsorship: bool | None = None,
+    relocation_support: bool | None = None,
+    work_authorization: str = "",
 ) -> dict:
     candidate = candidate_for_user(
         db,
@@ -998,7 +1229,7 @@ def search_jobs(
     )
 
     if q:
-        term = f"%{q.lower()}%"
+        term = f"%{q.strip().lower()}%"
 
         filters.append(
             or_(
@@ -1011,15 +1242,163 @@ def search_jobs(
                 func.lower(
                     JobPosting.description
                 ).like(term),
+                func.lower(
+                    func.coalesce(
+                        JobPosting.category,
+                        "",
+                    )
+                ).like(term),
+                func.lower(
+                    func.coalesce(
+                        JobPosting.occupation,
+                        "",
+                    )
+                ).like(term),
             )
         )
 
     if location:
+        location_term = (
+            f"%{location.strip().lower()}%"
+        )
+
+        filters.append(
+            or_(
+                func.lower(
+                    JobPosting.location
+                ).like(location_term),
+                func.lower(
+                    func.coalesce(
+                        JobPosting.city,
+                        "",
+                    )
+                ).like(location_term),
+                func.lower(
+                    JobPosting.country
+                ).like(location_term),
+            )
+        )
+
+    if country:
+        country_term = (
+            f"%{country.strip().lower()}%"
+        )
+
+        filters.append(
+            or_(
+                func.lower(
+                    JobPosting.country
+                ).like(country_term),
+                func.lower(
+                    func.coalesce(
+                        JobPosting.country_code,
+                        "",
+                    )
+                ).like(country_term),
+                func.lower(
+                    JobPosting.location
+                ).like(country_term),
+            )
+        )
+
+    if category:
         filters.append(
             func.lower(
-                JobPosting.location
+                func.coalesce(
+                    JobPosting.category,
+                    "",
+                )
             ).like(
-                f"%{location.lower()}%"
+                f"%{category.strip().lower()}%"
+            )
+        )
+
+    if work_mode:
+        normalized_mode = (
+            work_mode.strip()
+            .lower()
+            .replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+        )
+
+        mode_aliases = {
+            "remote": "remote",
+            "hybrid": "hybrid",
+            "onsite": "onsite",
+        }
+
+        normalized_mode = (
+            mode_aliases.get(
+                normalized_mode,
+                normalized_mode,
+            )
+        )
+
+        filters.append(
+            func.lower(
+                func.coalesce(
+                    JobPosting.remote_mode,
+                    "",
+                )
+            )
+            == normalized_mode
+        )
+
+    if employment_type:
+        filters.append(
+            func.lower(
+                func.coalesce(
+                    JobPosting.employment_type,
+                    "",
+                )
+            ).like(
+                f"%{employment_type.strip().lower()}%"
+            )
+        )
+
+    if salary_min is not None:
+        filters.append(
+            or_(
+                JobPosting.salary_max
+                >= salary_min,
+                JobPosting.salary_min
+                >= salary_min,
+            )
+        )
+
+    if currency:
+        filters.append(
+            func.lower(
+                func.coalesce(
+                    JobPosting.salary_currency,
+                    "",
+                )
+            )
+            == currency.strip().lower()
+        )
+
+    if visa_sponsorship is not None:
+        filters.append(
+            JobPosting.visa_sponsorship
+            .is_(visa_sponsorship)
+        )
+
+    if relocation_support is not None:
+        filters.append(
+            JobPosting.relocation_support
+            .is_(relocation_support)
+        )
+
+    if work_authorization:
+        filters.append(
+            func.lower(
+                func.coalesce(
+                    JobPosting.work_authorization,
+                    "",
+                )
+            ).like(
+                f"%{work_authorization.strip().lower()}%"
             )
         )
 
@@ -1421,38 +1800,165 @@ def calculate_match(
     preference_score = 0.5
 
     if preference:
-        title_hit = (
-            not preference.target_titles
-            or any(
-                target.lower()
-                in job.title.lower()
-                or job.title.lower()
-                in target.lower()
+        preference_checks: list[float] = []
+
+        if preference.target_titles:
+            title_hit = any(
+                target.casefold()
+                in job.title.casefold()
+                or job.title.casefold()
+                in target.casefold()
                 for target
                 in preference.target_titles
+                if target.strip()
             )
-        )
 
-        location_hit = (
-            not preference.locations
-            or any(
-                target.lower()
-                in job.location.lower()
+            preference_checks.append(
+                float(title_hit)
+            )
+
+        if preference.locations:
+            location_text = " ".join(
+                value
+                for value in [
+                    job.location,
+                    job.city or "",
+                    job.country,
+                ]
+                if value
+            ).casefold()
+
+            location_hit = any(
+                target.casefold()
+                in location_text
                 for target
                 in preference.locations
+                if target.strip()
             )
-        )
 
-        preference_score = (
-            float(title_hit)
-            + float(location_hit)
-        ) / 2
+            preference_checks.append(
+                float(location_hit)
+            )
+
+        if preference.preferred_countries:
+            country_text = " ".join(
+                value
+                for value in [
+                    job.country,
+                    job.country_code or "",
+                    job.location,
+                ]
+                if value
+            ).casefold()
+
+            country_hit = any(
+                target.casefold()
+                in country_text
+                for target
+                in preference.preferred_countries
+                if target.strip()
+            )
+
+            preference_checks.append(
+                float(country_hit)
+            )
+
+        if preference.work_modes:
+            normalized_job_mode = (
+                (job.remote_mode or "")
+                .casefold()
+                .replace("-", "")
+                .replace("_", "")
+                .replace(" ", "")
+            )
+
+            normalized_preferences = {
+                value.casefold()
+                .replace("-", "")
+                .replace("_", "")
+                .replace(" ", "")
+                for value
+                in preference.work_modes
+                if value.strip()
+            }
+
+            preference_checks.append(
+                float(
+                    normalized_job_mode
+                    in normalized_preferences
+                )
+                if normalized_job_mode
+                else 0.5
+            )
+
+        if preference.job_categories:
+            if job.category:
+                category_hit = any(
+                    target.casefold()
+                    in job.category.casefold()
+                    or job.category.casefold()
+                    in target.casefold()
+                    for target
+                    in preference.job_categories
+                    if target.strip()
+                )
+
+                preference_checks.append(
+                    float(category_hit)
+                )
+
+            else:
+                preference_checks.append(
+                    0.5
+                )
+
+        if preference.visa_sponsorship_required:
+            if job.visa_sponsorship is True:
+                preference_checks.append(
+                    1.0
+                )
+            elif job.visa_sponsorship is False:
+                preference_checks.append(
+                    0.0
+                )
+            else:
+                preference_checks.append(
+                    0.5
+                )
+
+        if preference.work_authorizations:
+            if job.work_authorization:
+                authorization_hit = any(
+                    target.casefold()
+                    in job.work_authorization.casefold()
+                    for target
+                    in preference.work_authorizations
+                    if target.strip()
+                )
+
+                preference_checks.append(
+                    float(authorization_hit)
+                )
+
+            else:
+                preference_checks.append(
+                    0.5
+                )
+
+        if preference_checks:
+            preference_score = (
+                sum(preference_checks)
+                / len(preference_checks)
+            )
 
     certification_score = (
         1.0
         if any(
             entry.entry_type
-            == "certification"
+            in {
+                "certification",
+                "license",
+            }
             for entry in entries
         )
         else 0.5
@@ -1570,6 +2076,10 @@ def match_dict(
         "company": job.company,
         "role": job.title,
         "location": job.location,
+        "country": job.country,
+        "city": job.city,
+        "category": job.category,
+        "work_mode": job.remote_mode,
         "score": match.score,
         "factor_breakdown": (
             match.factor_breakdown
