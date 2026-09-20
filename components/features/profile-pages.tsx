@@ -88,6 +88,53 @@ const split = (value: string) =>
     .filter(Boolean);
 
 
+type GlobalPreferences = Preferences & {
+  preferred_countries: string[];
+  job_categories: string[];
+  visa_sponsorship_required: boolean;
+  work_authorizations: string[];
+};
+
+
+type PreferenceTextFieldKey =
+  | 'target_titles'
+  | 'industries'
+  | 'experience_levels'
+  | 'preferred_companies'
+  | 'locations'
+  | 'preferred_countries'
+  | 'job_categories'
+  | 'work_modes'
+  | 'employment_types'
+  | 'work_authorizations';
+
+
+const preferenceTextFields = (
+  data: GlobalPreferences,
+) => ({
+  target_titles:
+    (data.target_titles ?? []).join(', '),
+  industries:
+    (data.industries ?? []).join(', '),
+  experience_levels:
+    (data.experience_levels ?? []).join(', '),
+  preferred_companies:
+    (data.preferred_companies ?? []).join(', '),
+  locations:
+    (data.locations ?? []).join(', '),
+  preferred_countries:
+    (data.preferred_countries ?? []).join(', '),
+  job_categories:
+    (data.job_categories ?? []).join(', '),
+  work_modes:
+    (data.work_modes ?? []).join(', '),
+  employment_types:
+    (data.employment_types ?? []).join(', '),
+  work_authorizations:
+    (data.work_authorizations ?? []).join(', '),
+});
+
+
 type FactStyle = {
   icon: LucideIcon;
   label: string;
@@ -131,6 +178,15 @@ const factMeta: Record<string, FactStyle> = {
       'border-violet-500/15 bg-violet-500/[0.055]',
     iconColor:
       'border-violet-500/15 bg-violet-500/10 text-violet-400',
+  },
+
+  license: {
+    icon: BadgeCheck,
+    label: 'Licenses',
+    color:
+      'border-teal-500/15 bg-teal-500/[0.055]',
+    iconColor:
+      'border-teal-500/15 bg-teal-500/10 text-teal-400',
   },
 
   project: {
@@ -1319,36 +1375,137 @@ export function PreferencesPage() {
     queryKey: ['preferences'],
 
     queryFn: () =>
-      api.get<Preferences>(
+      api.get<GlobalPreferences>(
         '/preferences',
       ),
   });
 
 
   const [form, setForm] =
-    useState<Preferences | null>(
+    useState<GlobalPreferences | null>(
       null,
     );
 
 
+  const [
+    arrayFields,
+    setArrayFields,
+  ] = useState({
+    target_titles: '',
+    industries: '',
+    experience_levels: '',
+    preferred_companies: '',
+    locations: '',
+    preferred_countries: '',
+    job_categories: '',
+    work_modes: '',
+    employment_types: '',
+    work_authorizations: '',
+  });
+
+
   useEffect(() => {
-    if (q.data) {
-      setForm(q.data);
-    }
+    if (!q.data) return;
+
+    const normalized: GlobalPreferences = {
+      ...q.data,
+      preferred_countries:
+        q.data.preferred_countries ?? [],
+      job_categories:
+        q.data.job_categories ?? [],
+      work_authorizations:
+        q.data.work_authorizations ?? [],
+      visa_sponsorship_required:
+        q.data.visa_sponsorship_required ??
+        false,
+    };
+
+    setForm(normalized);
+    setArrayFields(
+      preferenceTextFields(
+        normalized,
+      ),
+    );
   }, [q.data]);
 
 
   const save = useMutation({
-    mutationFn: () =>
-      api.put<Preferences>(
+    mutationFn: () => {
+      if (!form) {
+        throw new Error(
+          'Preferences are not ready',
+        );
+      }
+
+      const payload: GlobalPreferences = {
+        ...form,
+        target_titles: split(
+          arrayFields.target_titles,
+        ),
+        industries: split(
+          arrayFields.industries,
+        ),
+        experience_levels: split(
+          arrayFields.experience_levels,
+        ),
+        preferred_companies: split(
+          arrayFields.preferred_companies,
+        ),
+        locations: split(
+          arrayFields.locations,
+        ),
+        preferred_countries: split(
+          arrayFields.preferred_countries,
+        ),
+        job_categories: split(
+          arrayFields.job_categories,
+        ),
+        work_modes: split(
+          arrayFields.work_modes,
+        ),
+        employment_types: split(
+          arrayFields.employment_types,
+        ),
+        work_authorizations: split(
+          arrayFields.work_authorizations,
+        ),
+        salary_currency:
+          form.salary_currency
+            ?.trim()
+            .toUpperCase() ||
+          null,
+      };
+
+      return api.put<GlobalPreferences>(
         '/preferences',
-        form!,
-      ),
+        payload,
+      );
+    },
 
     onSuccess: (data) => {
+      const normalized: GlobalPreferences = {
+        ...data,
+        preferred_countries:
+          data.preferred_countries ?? [],
+        job_categories:
+          data.job_categories ?? [],
+        work_authorizations:
+          data.work_authorizations ?? [],
+        visa_sponsorship_required:
+          data.visa_sponsorship_required ??
+          false,
+      };
+
       client.setQueryData(
         ['preferences'],
-        data,
+        normalized,
+      );
+
+      setForm(normalized);
+      setArrayFields(
+        preferenceTextFields(
+          normalized,
+        ),
       );
 
       push(
@@ -1385,23 +1542,17 @@ export function PreferencesPage() {
   }
 
 
-  const text = (
-    value: string[],
-  ) => value.join(', ');
-
-
-  const updateArray = (
-    key: keyof Preferences,
+  function updateTextField(
+    key: PreferenceTextFieldKey,
     value: string,
-  ) =>
-    setForm((current) =>
-      current
-        ? {
-            ...current,
-            [key]: split(value),
-          }
-        : current,
+  ) {
+    setArrayFields(
+      (current) => ({
+        ...current,
+        [key]: value,
+      }),
     );
+  }
 
 
   function submit(
@@ -1418,7 +1569,7 @@ export function PreferencesPage() {
       <PageHeader
         eyebrow="Job discovery"
         title="Job preferences"
-        description="Tell CareerPilot what a good opportunity looks like. These preferences tune recommendations without changing your verified profile."
+        description="Tell CareerPilot what a good opportunity looks like. These preferences tune local and international recommendations without changing your verified career evidence."
         actions={
           <Link href="/dashboard/jobs">
             <Button variant="secondary">
@@ -1438,7 +1589,7 @@ export function PreferencesPage() {
         <PreferenceSection
           icon={Target}
           title="Target roles"
-          description="What kinds of positions and industries are you interested in?"
+          description="Choose the roles, occupations, industries, and career levels you want CareerPilot to prioritize."
           color="indigo"
         >
           <PreferenceField
@@ -1446,35 +1597,53 @@ export function PreferencesPage() {
             hint="Separate multiple values with commas."
           >
             <Input
-              value={text(
-                form.target_titles,
-              )}
+              value={
+                arrayFields.target_titles
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'target_titles',
                   e.target.value,
                 )
               }
-              placeholder="Senior Engineer, Product Engineer, Platform Engineer"
+              placeholder="AI Engineer, Accountant, Registered Nurse"
               className="h-11"
             />
           </PreferenceField>
 
 
           <PreferenceField
-            label="Industries"
+            label="Job categories"
+            hint="Broad categories are useful for discovery."
           >
             <Input
-              value={text(
-                form.industries,
-              )}
+              value={
+                arrayFields.job_categories
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
+                  'job_categories',
+                  e.target.value,
+                )
+              }
+              placeholder="Technology, Healthcare, Finance, Education"
+              className="h-11"
+            />
+          </PreferenceField>
+
+
+          <PreferenceField label="Industries">
+            <Input
+              value={
+                arrayFields.industries
+              }
+              onChange={(e) =>
+                updateTextField(
                   'industries',
                   e.target.value,
                 )
               }
-              placeholder="SaaS, Fintech, AI"
+              placeholder="SaaS, Banking, Construction, Healthcare"
               className="h-11"
             />
           </PreferenceField>
@@ -1484,16 +1653,16 @@ export function PreferencesPage() {
             label="Experience levels"
           >
             <Input
-              value={text(
-                form.experience_levels,
-              )}
+              value={
+                arrayFields.experience_levels
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'experience_levels',
                   e.target.value,
                 )
               }
-              placeholder="Senior, Staff"
+              placeholder="Entry, Mid-level, Senior, Lead"
               className="h-11"
             />
           </PreferenceField>
@@ -1503,11 +1672,11 @@ export function PreferencesPage() {
             label="Preferred companies"
           >
             <Input
-              value={text(
-                form.preferred_companies,
-              )}
+              value={
+                arrayFields.preferred_companies
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'preferred_companies',
                   e.target.value,
                 )
@@ -1522,39 +1691,62 @@ export function PreferencesPage() {
         {/* Location */}
         <PreferenceSection
           icon={Globe2}
-          title="Location and work style"
-          description="Control where CareerPilot should search and what working arrangements you prefer."
+          title="Location and mobility"
+          description="Use actual country names for international discovery. You can still add cities, regions, and Remote as preferred locations."
           color="cyan"
         >
-          <PreferenceField label="Preferred locations">
+          <PreferenceField
+            label="Preferred countries"
+            hint="Separate countries with commas."
+          >
             <Input
-              value={text(
-                form.locations,
-              )}
+              value={
+                arrayFields.preferred_countries
+              }
               onChange={(e) =>
-                updateArray(
-                  'locations',
+                updateTextField(
+                  'preferred_countries',
                   e.target.value,
                 )
               }
-              placeholder="Colombo, London, Amsterdam, Remote"
+              placeholder="India, Singapore, Germany, Canada, United States"
               className="h-11"
             />
           </PreferenceField>
 
 
-          <PreferenceField label="Work modes">
+          <PreferenceField label="Preferred locations">
             <Input
-              value={text(
-                form.work_modes,
-              )}
+              value={
+                arrayFields.locations
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
+                  'locations',
+                  e.target.value,
+                )
+              }
+              placeholder="Kochi, Bengaluru, Toronto, Berlin, Remote"
+              className="h-11"
+            />
+          </PreferenceField>
+
+
+          <PreferenceField
+            label="Work modes"
+            hint="Use Remote, Hybrid, Onsite."
+          >
+            <Input
+              value={
+                arrayFields.work_modes
+              }
+              onChange={(e) =>
+                updateTextField(
                   'work_modes',
                   e.target.value,
                 )
               }
-              placeholder="Remote, Hybrid, On-site"
+              placeholder="Remote, Hybrid, Onsite"
               className="h-11"
             />
           </PreferenceField>
@@ -1562,35 +1754,71 @@ export function PreferencesPage() {
 
           <PreferenceField label="Employment types">
             <Input
-              value={text(
-                form.employment_types,
-              )}
+              value={
+                arrayFields.employment_types
+              }
               onChange={(e) =>
-                updateArray(
+                updateTextField(
                   'employment_types',
                   e.target.value,
                 )
               }
-              placeholder="Full-time, Contract"
+              placeholder="Full-time, Contract, Part-time"
               className="h-11"
             />
           </PreferenceField>
 
 
-          <div className="flex items-center">
-            <RelocationToggle
-              checked={
-                form.relocation_willing
+          <PreferenceField
+            label="Work authorizations"
+            hint="Only add authorizations you actually hold."
+          >
+            <Input
+              value={
+                arrayFields.work_authorizations
               }
-              onChange={(value) =>
-                setForm({
-                  ...form,
-                  relocation_willing:
-                    value,
-                })
+              onChange={(e) =>
+                updateTextField(
+                  'work_authorizations',
+                  e.target.value,
+                )
               }
+              placeholder="India, Canada PR, US citizen, EU work authorization"
+              className="h-11"
             />
-          </div>
+          </PreferenceField>
+
+
+          <PreferenceToggle
+            checked={
+              form.visa_sponsorship_required
+            }
+            onChange={(value) =>
+              setForm({
+                ...form,
+                visa_sponsorship_required:
+                  value,
+              })
+            }
+            title="Visa sponsorship required"
+            description="Prioritize jobs that explicitly offer sponsorship when the provider supplies that information."
+          />
+
+
+          <PreferenceToggle
+            checked={
+              form.relocation_willing
+            }
+            onChange={(value) =>
+              setForm({
+                ...form,
+                relocation_willing:
+                  value,
+              })
+            }
+            title="Willing to relocate"
+            description="Allow suitable opportunities outside your current location to rank more strongly."
+          />
         </PreferenceSection>
 
 
@@ -1598,7 +1826,7 @@ export function PreferencesPage() {
         <PreferenceSection
           icon={BriefcaseBusiness}
           title="Compensation"
-          description="Set a minimum salary preference to reduce low-relevance recommendations."
+          description="Set a minimum salary and currency so CareerPilot can avoid comparing unrelated salary markets."
           color="emerald"
         >
           <PreferenceField label="Minimum salary">
@@ -1642,7 +1870,7 @@ export function PreferencesPage() {
                     null,
                 })
               }
-              placeholder="USD"
+              placeholder="USD, INR, CAD, EUR"
               className="h-11 uppercase"
             />
           </PreferenceField>
@@ -1687,7 +1915,7 @@ export function PreferencesPage() {
 
           <div className="flex items-end">
             <div className="rounded-[12px] border border-border bg-surface-2/60 p-4 text-11 leading-5 text-text-secondary">
-              Your verified career evidence stays unchanged. Preferences only influence which opportunities CareerPilot prioritizes.
+              Verified career evidence stays unchanged. Preferences only influence discovery, filtering, and recommendation relevance.
             </div>
           </div>
         </PreferenceSection>
@@ -2015,14 +2243,18 @@ function PreferenceField({
 }
 
 
-function RelocationToggle({
+function PreferenceToggle({
   checked,
   onChange,
+  title,
+  description,
 }: {
   checked: boolean;
   onChange: (
     value: boolean,
   ) => void;
+  title: string;
+  description: string;
 }) {
   return (
     <button
@@ -2050,11 +2282,11 @@ function RelocationToggle({
 
       <span>
         <span className="block text-12 font-medium">
-          Willing to relocate
+          {title}
         </span>
 
-        <span className="mt-0.5 block text-[10px] text-text-secondary">
-          Include suitable international opportunities.
+        <span className="mt-0.5 block text-[10px] leading-4 text-text-secondary">
+          {description}
         </span>
       </span>
     </button>
