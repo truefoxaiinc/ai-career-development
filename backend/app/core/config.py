@@ -130,8 +130,13 @@ class Settings(BaseSettings):
 
     jooble_api_key: str | None = None
 
-    # India by default.
+    # India by default. This remains the fallback Jooble endpoint.
     jooble_domain: str = "in.jooble.org"
+
+    # Optional per-country Jooble domains for global discovery. Keys are
+    # ISO-3166 alpha-2 country codes, e.g. {"IN":"in.jooble.org"}.
+    # Keep this empty unless you have verified/configured those domains.
+    jooble_country_domains_json: str = "{}"
 
     usajobs_api_key: str | None = None
     usajobs_user_agent_email: str | None = None
@@ -184,6 +189,52 @@ class Settings(BaseSettings):
         )
 
         return domain
+
+    @property
+    def jooble_country_domains(
+        self,
+    ) -> dict[str, str]:
+        parsed = json.loads(
+            self.jooble_country_domains_json
+            or "{}"
+        )
+
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                "JOOBLE_COUNTRY_DOMAINS_JSON "
+                "must be a JSON object"
+            )
+
+        domains: dict[str, str] = {}
+
+        for raw_code, raw_domain in parsed.items():
+            code = str(raw_code).strip().upper()
+            domain = (
+                str(raw_domain or "")
+                .strip()
+                .removeprefix("https://")
+                .removeprefix("http://")
+                .rstrip("/")
+            )
+
+            if len(code) != 2 or not domain:
+                continue
+
+            domains[code] = domain
+
+        # Preserve backwards compatibility with JOOBLE_DOMAIN by making
+        # its obvious country prefix available automatically.
+        first_label = self.jooble_domain.split(".", 1)[0].lower()
+
+        if first_label == "uk":
+            domains.setdefault("GB", self.jooble_domain)
+        elif len(first_label) == 2:
+            domains.setdefault(
+                first_label.upper(),
+                self.jooble_domain,
+            )
+
+        return domains
 
     @property
     def matching_weights(
