@@ -16,14 +16,39 @@ import type {
 } from '@/lib/types';
 
 
+export type GlobalJob = Job & {
+  country?: string | null;
+  country_code?: string | null;
+  city?: string | null;
+  category?: string | null;
+  occupation?: string | null;
+  visa_sponsorship?: boolean | null;
+  relocation_support?: boolean | null;
+  work_authorization?: string | null;
+};
+
+
+export type JobSearchParams = {
+  q?: string;
+  location?: string;
+  country?: string;
+  category?: string;
+  work_mode?: string;
+  employment_type?: string;
+  salary_min?: number;
+  currency?: string;
+  visa_sponsorship?: boolean;
+  relocation_support?: boolean;
+  work_authorization?: string;
+  source?: string;
+  sort?: string;
+  page?: number;
+  page_size?: number;
+};
+
+
 export function useJobs(
-  params: {
-    q?: string;
-    location?: string;
-    source?: string;
-    sort?: string;
-    page?: number;
-  } = {},
+  params: JobSearchParams = {},
 ) {
   return useQuery({
     queryKey: [
@@ -33,7 +58,7 @@ export function useJobs(
 
     queryFn: () =>
       api.get<{
-        items: Job[];
+        items: GlobalJob[];
         page: number;
         page_size: number;
         total: number;
@@ -59,7 +84,7 @@ export function useRecommendations() {
     ],
 
     queryFn: () =>
-      api.get<Job[]>(
+      api.get<GlobalJob[]>(
         '/jobs/recommendations',
       ),
   });
@@ -74,7 +99,7 @@ export function useSavedJobs() {
     ],
 
     queryFn: () =>
-      api.get<Job[]>(
+      api.get<GlobalJob[]>(
         '/jobs/saved',
       ),
   });
@@ -137,7 +162,7 @@ export function useDiscoverJobs() {
             'preferences_required'
           ) {
             throw new Error(
-              'Set at least one target job title in Preferences before discovering jobs.',
+              'Set at least one target job title or job category in Preferences before discovering jobs.',
             );
           }
 

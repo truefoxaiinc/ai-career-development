@@ -43,7 +43,6 @@ import {
 import { api } from '@/lib/api';
 
 import type {
-  Job,
   MatchResult,
 } from '@/lib/types';
 
@@ -67,6 +66,7 @@ import {
   useJobSources,
   useRecommendations,
   useSavedJobs,
+  type GlobalJob,
 } from '@/hooks/useJobs';
 
 import { useToast } from '@/components/toast';
@@ -110,6 +110,74 @@ const cleanText = (value?: string | null) =>
   value
     ? value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
     : '';
+
+
+type TriState = '' | 'true' | 'false';
+
+
+const triStateBoolean = (
+  value: TriState,
+): boolean | null =>
+  value === ''
+    ? null
+    : value === 'true';
+
+
+const formatAvailability = (
+  value?: boolean | null,
+) =>
+  value === true
+    ? 'Yes'
+    : value === false
+      ? 'No'
+      : 'Not specified';
+
+
+const formatSalary = (
+  job: GlobalJob,
+) => {
+  const currency =
+    job.salary_currency?.toUpperCase();
+
+  if (
+    job.salary_min == null &&
+    job.salary_max == null
+  ) {
+    return 'Not specified';
+  }
+
+  const formatNumber = (
+    value: number,
+  ) =>
+    value.toLocaleString();
+
+  const prefix =
+    currency
+      ? `${currency} `
+      : '';
+
+  if (
+    job.salary_min != null &&
+    job.salary_max != null
+  ) {
+    return `${prefix}${formatNumber(
+      job.salary_min,
+    )} – ${formatNumber(
+      job.salary_max,
+    )}`;
+  }
+
+  if (job.salary_min != null) {
+    return `${prefix}${formatNumber(
+      job.salary_min,
+    )}+`;
+  }
+
+  return `Up to ${prefix}${formatNumber(
+    job.salary_max!,
+  )}`;
+};
+
 
 const formatSource = (source: string) =>
   source.replaceAll('_', ' ');
@@ -207,7 +275,7 @@ function JobCard({
   job,
   showMatch = true,
 }: {
-  job: Job;
+  job: GlobalJob;
   showMatch?: boolean;
 }) {
   const client = useQueryClient();
@@ -277,10 +345,16 @@ function JobCard({
           queryKey: ['jobs'],
         }),
         client.invalidateQueries({
-          queryKey: ['recommendations'],
+          queryKey: [
+            'jobs',
+            'recommendations',
+          ],
         }),
         client.invalidateQueries({
-          queryKey: ['saved-jobs'],
+          queryKey: [
+            'jobs',
+            'saved',
+          ],
         }),
       ]);
 
@@ -323,6 +397,19 @@ function JobCard({
                 </span>
               )}
 
+              {job.category && (
+                <span className="rounded-full border border-violet-500/10 bg-violet-500/[0.07] px-2 py-1 text-[9px] font-medium text-violet-400">
+                  {job.category}
+                </span>
+              )}
+
+              {job.visa_sponsorship ===
+                true && (
+                <span className="rounded-full border border-emerald-500/10 bg-emerald-500/[0.07] px-2 py-1 text-[9px] font-medium text-emerald-400">
+                  Visa sponsorship
+                </span>
+              )}
+
               {typeof score ===
                 'number' && (
                 <span
@@ -351,6 +438,13 @@ function JobCard({
                 {job.location ||
                   'Location not provided'}
               </span>
+
+              {job.country && (
+                <span className="flex items-center gap-1.5">
+                  <Globe2 size={12} />
+                  {job.country}
+                </span>
+              )}
 
               {job.employment_type && (
                 <span className="flex items-center gap-1.5">
@@ -703,6 +797,41 @@ export function JobSearchPage() {
   const [location, setLocation] =
     useState('');
 
+  const [country, setCountry] =
+    useState('');
+
+  const [category, setCategory] =
+    useState('');
+
+  const [workMode, setWorkMode] =
+    useState('');
+
+  const [
+    employmentType,
+    setEmploymentType,
+  ] = useState('');
+
+  const [salaryMin, setSalaryMin] =
+    useState('');
+
+  const [currency, setCurrency] =
+    useState('');
+
+  const [
+    visaSponsorship,
+    setVisaSponsorship,
+  ] = useState<TriState>('');
+
+  const [
+    relocationSupport,
+    setRelocationSupport,
+  ] = useState<TriState>('');
+
+  const [
+    workAuthorization,
+    setWorkAuthorization,
+  ] = useState('');
+
   const [source, setSource] =
     useState('');
 
@@ -727,9 +856,57 @@ export function JobSearchPage() {
       400,
     );
 
+  const deferredCountry =
+    useDebouncedValue(
+      country,
+      400,
+    );
+
+  const deferredCategory =
+    useDebouncedValue(
+      category,
+      400,
+    );
+
+  const deferredAuthorization =
+    useDebouncedValue(
+      workAuthorization,
+      400,
+    );
+
+  const normalizedSalaryMin =
+    salaryMin
+      ? Number(salaryMin)
+      : undefined;
+
   const jobs = useJobs({
     q: deferredQuery,
     location: deferredLocation,
+    country: deferredCountry,
+    category: deferredCategory,
+    work_mode: workMode,
+    employment_type:
+      employmentType,
+    salary_min:
+      Number.isFinite(
+        normalizedSalaryMin,
+      )
+        ? normalizedSalaryMin
+        : undefined,
+    currency:
+      currency.trim().toUpperCase(),
+    visa_sponsorship:
+      visaSponsorship === ''
+        ? undefined
+        : visaSponsorship ===
+          'true',
+    relocation_support:
+      relocationSupport === ''
+        ? undefined
+        : relocationSupport ===
+          'true',
+    work_authorization:
+      deferredAuthorization,
     source,
     sort,
     page,
@@ -744,22 +921,97 @@ export function JobSearchPage() {
   const { push } =
     useToast();
 
+  type ManualJobDraft = {
+    title: string;
+    company: string;
+    location: string;
+    country: string;
+    city: string;
+    category: string;
+    occupation: string;
+    remote_mode: string;
+    salary_min: string;
+    salary_max: string;
+    salary_currency: string;
+    employment_type: string;
+    visa_sponsorship: TriState;
+    relocation_support: TriState;
+    work_authorization: string;
+    description: string;
+    apply_url: string;
+  };
+
+  const emptyManualJob =
+    (): ManualJobDraft => ({
+      title: '',
+      company: '',
+      location: '',
+      country: '',
+      city: '',
+      category: '',
+      occupation: '',
+      remote_mode: '',
+      salary_min: '',
+      salary_max: '',
+      salary_currency: '',
+      employment_type: '',
+      visa_sponsorship: '',
+      relocation_support: '',
+      work_authorization: '',
+      description: '',
+      apply_url: '',
+    });
+
   const [
     manualData,
     setManualData,
-  ] = useState({
-    title: '',
-    company: '',
-    location: '',
-    description: '',
-    apply_url: '',
-  });
+  ] = useState<ManualJobDraft>(
+    emptyManualJob,
+  );
 
   const add = useMutation({
     mutationFn: () =>
-      api.post<Job>(
+      api.post<GlobalJob>(
         '/jobs/manual',
-        manualData,
+        {
+          ...manualData,
+          remote_mode:
+            manualData.remote_mode ||
+            null,
+          salary_min:
+            manualData.salary_min
+              ? Number(
+                  manualData.salary_min,
+                )
+              : null,
+          salary_max:
+            manualData.salary_max
+              ? Number(
+                  manualData.salary_max,
+                )
+              : null,
+          salary_currency:
+            manualData.salary_currency
+              .trim()
+              .toUpperCase() ||
+            null,
+          employment_type:
+            manualData.employment_type
+              .trim() ||
+            null,
+          visa_sponsorship:
+            triStateBoolean(
+              manualData.visa_sponsorship,
+            ),
+          relocation_support:
+            triStateBoolean(
+              manualData.relocation_support,
+            ),
+          work_authorization:
+            manualData.work_authorization
+              .trim() ||
+            null,
+        },
       ),
 
     onSuccess: async () => {
@@ -768,14 +1020,9 @@ export function JobSearchPage() {
       );
 
       setManual(false);
-
-      setManualData({
-        title: '',
-        company: '',
-        location: '',
-        description: '',
-        apply_url: '',
-      });
+      setManualData(
+        emptyManualJob(),
+      );
 
       await client.invalidateQueries({
         queryKey: ['jobs'],
@@ -787,6 +1034,15 @@ export function JobSearchPage() {
     Boolean(
       query ||
         location ||
+        country ||
+        category ||
+        workMode ||
+        employmentType ||
+        salaryMin ||
+        currency ||
+        visaSponsorship ||
+        relocationSupport ||
+        workAuthorization ||
         source ||
         sort !== 'recent',
     );
@@ -801,6 +1057,15 @@ export function JobSearchPage() {
   function resetFilters() {
     setQuery('');
     setLocation('');
+    setCountry('');
+    setCategory('');
+    setWorkMode('');
+    setEmploymentType('');
+    setSalaryMin('');
+    setCurrency('');
+    setVisaSponsorship('');
+    setRelocationSupport('');
+    setWorkAuthorization('');
     setSource('');
     setSort('recent');
     setPage(1);
@@ -811,7 +1076,7 @@ export function JobSearchPage() {
       <PageHeader
         eyebrow="Job discovery"
         title="Search opportunities"
-        description="Search your connected job sources or bring in a vacancy from elsewhere for private analysis."
+        description="Search normalized jobs across local and international sources, or add a vacancy privately for analysis."
         actions={
           <Button
             onClick={() =>
@@ -857,8 +1122,10 @@ export function JobSearchPage() {
                 <p className="mt-1 max-w-xl text-11 leading-5 text-text-secondary">
                   Paste a role you found
                   outside your configured job
-                  sources. It stays private
-                  to your account.
+                  sources. Add only details
+                  stated by the vacancy; unknown
+                  visa or relocation information
+                  can stay unspecified.
                 </p>
               </div>
             </div>
@@ -885,7 +1152,7 @@ export function JobSearchPage() {
                     }),
                   )
                 }
-                placeholder="Senior Software Engineer"
+                placeholder="Registered Nurse"
                 className="h-11"
               />
             </SearchField>
@@ -924,7 +1191,272 @@ export function JobSearchPage() {
                     }),
                   )
                 }
-                placeholder="London, UK"
+                placeholder="Toronto, Canada · Hybrid"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Country">
+              <Input
+                value={
+                  manualData.country
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      country:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Canada"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="City">
+              <Input
+                value={
+                  manualData.city
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      city:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Toronto"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Job category">
+              <Input
+                value={
+                  manualData.category
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      category:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Healthcare"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Occupation">
+              <Input
+                value={
+                  manualData.occupation
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      occupation:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Registered Nurse"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Work mode">
+              <Select
+                value={
+                  manualData.remote_mode
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      remote_mode:
+                        e.target.value,
+                    }),
+                  )
+                }
+                className="h-11"
+              >
+                <option value="">
+                  Not specified
+                </option>
+                <option value="remote">
+                  Remote
+                </option>
+                <option value="hybrid">
+                  Hybrid
+                </option>
+                <option value="onsite">
+                  On-site
+                </option>
+              </Select>
+            </SearchField>
+
+            <SearchField label="Employment type">
+              <Input
+                value={
+                  manualData.employment_type
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      employment_type:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Full-time"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Currency">
+              <Input
+                maxLength={8}
+                value={
+                  manualData.salary_currency
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      salary_currency:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="CAD"
+                className="h-11 uppercase"
+              />
+            </SearchField>
+
+            <SearchField label="Minimum salary">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  manualData.salary_min
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      salary_min:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="80000"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Maximum salary">
+              <Input
+                type="number"
+                min="0"
+                value={
+                  manualData.salary_max
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      salary_max:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="100000"
+                className="h-11"
+              />
+            </SearchField>
+
+            <SearchField label="Visa sponsorship">
+              <Select
+                value={
+                  manualData.visa_sponsorship
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      visa_sponsorship:
+                        e.target
+                          .value as TriState,
+                    }),
+                  )
+                }
+                className="h-11"
+              >
+                <option value="">
+                  Unknown / not stated
+                </option>
+                <option value="true">
+                  Available
+                </option>
+                <option value="false">
+                  Not available
+                </option>
+              </Select>
+            </SearchField>
+
+            <SearchField label="Relocation support">
+              <Select
+                value={
+                  manualData.relocation_support
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      relocation_support:
+                        e.target
+                          .value as TriState,
+                    }),
+                  )
+                }
+                className="h-11"
+              >
+                <option value="">
+                  Unknown / not stated
+                </option>
+                <option value="true">
+                  Available
+                </option>
+                <option value="false">
+                  Not available
+                </option>
+              </Select>
+            </SearchField>
+
+            <SearchField label="Work authorization">
+              <Input
+                value={
+                  manualData.work_authorization
+                }
+                onChange={(e) =>
+                  setManualData(
+                    (current) => ({
+                      ...current,
+                      work_authorization:
+                        e.target.value,
+                    }),
+                  )
+                }
+                placeholder="Must be authorized to work in Canada"
                 className="h-11"
               />
             </SearchField>
@@ -1003,7 +1535,7 @@ export function JobSearchPage() {
       )}
 
       <section className="career-search-hero mb-5 rounded-[22px] border border-border p-4 md:p-5">
-        <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_180px_160px]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <SearchField
             label="What are you looking for?"
             icon={Search}
@@ -1022,7 +1554,7 @@ export function JobSearchPage() {
           </SearchField>
 
           <SearchField
-            label="Where?"
+            label="City or location"
             icon={MapPin}
           >
             <Input
@@ -1033,41 +1565,114 @@ export function JobSearchPage() {
                 );
                 setPage(1);
               }}
-              placeholder="City, country, remote"
+              placeholder="Kochi, Toronto, Remote"
+              className="h-12"
+            />
+          </SearchField>
+
+          <SearchField
+            label="Country"
+            icon={Globe2}
+          >
+            <Input
+              value={country}
+              onChange={(e) => {
+                setCountry(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+              placeholder="India, CA, Germany"
+              className="h-12"
+            />
+          </SearchField>
+
+          <SearchField label="Work mode">
+            <Select
+              className="h-12"
+              value={workMode}
+              onChange={(e) => {
+                setWorkMode(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+            >
+              <option value="">
+                Any work mode
+              </option>
+              <option value="remote">
+                Remote
+              </option>
+              <option value="hybrid">
+                Hybrid
+              </option>
+              <option value="onsite">
+                On-site
+              </option>
+            </Select>
+          </SearchField>
+
+          <SearchField label="Job category">
+            <Input
+              value={category}
+              onChange={(e) => {
+                setCategory(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+              placeholder="Technology, Healthcare"
+              className="h-12"
+            />
+          </SearchField>
+
+          <SearchField label="Employment type">
+            <Input
+              value={
+                employmentType
+              }
+              onChange={(e) => {
+                setEmploymentType(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+              placeholder="Full-time, Contract"
               className="h-12"
             />
           </SearchField>
 
           <SearchField label="Source">
-  <Select
-    className="h-12"
-    value={source}
-    onChange={(e) => {
-      setSource(
-        e.target.value,
-      );
+            <Select
+              className="h-12"
+              value={source}
+              onChange={(e) => {
+                setSource(
+                  e.target.value,
+                );
 
-      setPage(1);
-    }}
-  >
-    <option value="">
-      All sources
-    </option>
+                setPage(1);
+              }}
+            >
+              <option value="">
+                All sources
+              </option>
 
-    {sources.data?.map(
-      (provider) => (
-        <option
-          key={provider}
-          value={provider}
-        >
-          {formatSource(
-            provider,
-          )}
-        </option>
-      ),
-    )}
-  </Select>
-</SearchField>
+              {sources.data?.map(
+                (provider) => (
+                  <option
+                    key={provider}
+                    value={provider}
+                  >
+                    {formatSource(
+                      provider,
+                    )}
+                  </option>
+                ),
+              )}
+            </Select>
+          </SearchField>
 
           <SearchField label="Sort by">
             <Select
@@ -1089,6 +1694,108 @@ export function JobSearchPage() {
               </option>
             </Select>
           </SearchField>
+
+          <SearchField label="Minimum salary">
+            <Input
+              type="number"
+              min="0"
+              value={salaryMin}
+              onChange={(e) => {
+                setSalaryMin(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+              placeholder="100000"
+              className="h-12"
+            />
+          </SearchField>
+
+          <SearchField label="Currency">
+            <Input
+              maxLength={8}
+              value={currency}
+              onChange={(e) => {
+                setCurrency(
+                  e.target.value,
+                );
+                setPage(1);
+              }}
+              placeholder="USD, INR, CAD"
+              className="h-12 uppercase"
+            />
+          </SearchField>
+
+          <SearchField label="Visa sponsorship">
+            <Select
+              className="h-12"
+              value={visaSponsorship}
+              onChange={(e) => {
+                setVisaSponsorship(
+                  e.target
+                    .value as TriState,
+                );
+                setPage(1);
+              }}
+            >
+              <option value="">
+                Any / unknown
+              </option>
+              <option value="true">
+                Sponsorship available
+              </option>
+              <option value="false">
+                No sponsorship
+              </option>
+            </Select>
+          </SearchField>
+
+          <SearchField label="Relocation support">
+            <Select
+              className="h-12"
+              value={relocationSupport}
+              onChange={(e) => {
+                setRelocationSupport(
+                  e.target
+                    .value as TriState,
+                );
+                setPage(1);
+              }}
+            >
+              <option value="">
+                Any / unknown
+              </option>
+              <option value="true">
+                Support available
+              </option>
+              <option value="false">
+                No support
+              </option>
+            </Select>
+          </SearchField>
+
+          <div className="md:col-span-2 xl:col-span-4">
+            <SearchField
+              label="Work authorization"
+              icon={ShieldCheck}
+            >
+              <Input
+                value={workAuthorization}
+                onChange={(e) => {
+                  setWorkAuthorization(
+                    e.target.value,
+                  );
+                  setPage(1);
+                }}
+                placeholder="e.g. authorized to work in Canada, US citizen, EU"
+                className="h-12"
+              />
+            </SearchField>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-[12px] border border-border bg-surface-2/45 px-4 py-3 text-[10px] leading-5 text-text-secondary">
+          Visa sponsorship, relocation support, and work-authorization filters only match jobs where the provider supplied that information. Unknown provider data is not treated as “No”.
         </div>
 
         {hasFilters && (
@@ -1110,7 +1817,7 @@ export function JobSearchPage() {
 
             {location && (
               <FilterChip
-                label={location}
+                label={`Location: ${location}`}
                 onRemove={() => {
                   setLocation('');
                   setPage(1);
@@ -1118,9 +1825,109 @@ export function JobSearchPage() {
               />
             )}
 
+            {country && (
+              <FilterChip
+                label={`Country: ${country}`}
+                onRemove={() => {
+                  setCountry('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {category && (
+              <FilterChip
+                label={`Category: ${category}`}
+                onRemove={() => {
+                  setCategory('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {workMode && (
+              <FilterChip
+                label={`Work: ${workMode}`}
+                onRemove={() => {
+                  setWorkMode('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {employmentType && (
+              <FilterChip
+                label={`Employment: ${employmentType}`}
+                onRemove={() => {
+                  setEmploymentType('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {salaryMin && (
+              <FilterChip
+                label={`Salary ≥ ${currency ? `${currency.toUpperCase()} ` : ''}${salaryMin}`}
+                onRemove={() => {
+                  setSalaryMin('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {currency && (
+              <FilterChip
+                label={`Currency: ${currency.toUpperCase()}`}
+                onRemove={() => {
+                  setCurrency('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {visaSponsorship && (
+              <FilterChip
+                label={`Visa: ${
+                  visaSponsorship ===
+                  'true'
+                    ? 'Available'
+                    : 'Not available'
+                }`}
+                onRemove={() => {
+                  setVisaSponsorship('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {relocationSupport && (
+              <FilterChip
+                label={`Relocation: ${
+                  relocationSupport ===
+                  'true'
+                    ? 'Available'
+                    : 'Not available'
+                }`}
+                onRemove={() => {
+                  setRelocationSupport('');
+                  setPage(1);
+                }}
+              />
+            )}
+
+            {workAuthorization && (
+              <FilterChip
+                label={`Authorization: ${workAuthorization}`}
+                onRemove={() => {
+                  setWorkAuthorization('');
+                  setPage(1);
+                }}
+              />
+            )}
+
             {source && (
               <FilterChip
-                label={`Source: ${source}`}
+                label={`Source: ${formatSource(source)}`}
                 onRemove={() => {
                   setSource('');
                   setPage(1);
@@ -1164,7 +1971,7 @@ export function JobSearchPage() {
           .length ? (
         <EmptyState
           title="No imported jobs match these filters"
-          description="Search filters jobs already collected into CareerPilot. Use For you → Find new jobs first, then try a city such as Kochi or Bengaluru instead of a country-wide location."
+          description="Search filters jobs already collected into CareerPilot. Use For you → Find new jobs to import fresh opportunities, then broaden country, location, or sponsorship filters if needed."
         />
       ) : (
         <>
@@ -1246,6 +2053,7 @@ export function JobSearchPage() {
     </>
   );
 }
+
 
 /* =========================================================
    SAVED JOBS
@@ -1355,7 +2163,7 @@ export function JobDetailPage({
     ],
 
     queryFn: () =>
-      api.get<Job>(
+      api.get<GlobalJob>(
         `/jobs/${jobId}`,
       ),
   });
@@ -1450,6 +2258,19 @@ export function JobDetailPage({
                       {job.remote_mode}
                     </span>
                   )}
+
+                  {job.category && (
+                    <span className="rounded-full border border-violet-500/15 bg-violet-500/[0.08] px-2.5 py-1 text-[9px] font-medium text-violet-300">
+                      {job.category}
+                    </span>
+                  )}
+
+                  {job.visa_sponsorship ===
+                    true && (
+                    <span className="rounded-full border border-emerald-500/15 bg-emerald-500/[0.08] px-2.5 py-1 text-[9px] font-medium text-emerald-300">
+                      Visa sponsorship
+                    </span>
+                  )}
                 </div>
 
                 <h1 className="mt-4 max-w-4xl text-28 font-semibold leading-[1.05] tracking-[-0.04em] md:text-36">
@@ -1469,6 +2290,13 @@ export function JobDetailPage({
                     {job.location ||
                       'Location not provided'}
                   </span>
+
+                  {job.country && (
+                    <span className="flex items-center gap-1.5">
+                      <Globe2 size={12} />
+                      {job.country}
+                    </span>
+                  )}
 
                   {job.employment_type && (
                     <span className="flex items-center gap-1.5">
@@ -1615,9 +2443,74 @@ export function JobDetailPage({
               />
 
               <FactLine
+                label="Country"
+                value={
+                  job.country ||
+                  'Not specified'
+                }
+              />
+
+              <FactLine
+                label="City"
+                value={
+                  job.city ||
+                  'Not specified'
+                }
+              />
+
+              <FactLine
+                label="Category"
+                value={
+                  job.category ||
+                  'Not specified'
+                }
+              />
+
+              <FactLine
+                label="Occupation"
+                value={
+                  job.occupation ||
+                  'Not specified'
+                }
+              />
+
+              <FactLine
                 label="Employment"
                 value={
                   job.employment_type ||
+                  'Not specified'
+                }
+              />
+
+              <FactLine
+                label="Salary"
+                value={
+                  formatSalary(job)
+                }
+              />
+
+              <FactLine
+                label="Visa sponsorship"
+                value={
+                  formatAvailability(
+                    job.visa_sponsorship,
+                  )
+                }
+              />
+
+              <FactLine
+                label="Relocation support"
+                value={
+                  formatAvailability(
+                    job.relocation_support,
+                  )
+                }
+              />
+
+              <FactLine
+                label="Work authorization"
+                value={
+                  job.work_authorization ||
                   'Not specified'
                 }
               />

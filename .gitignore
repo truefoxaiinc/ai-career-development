@@ -17,3 +17,5 @@ fresh-resume.pdf
 fresh-resume.docx
 tailored-resume.pdf
 tailored-resume.docx
+
+*.tsbuildinfo
