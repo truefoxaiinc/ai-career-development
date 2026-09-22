@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     s3_region: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
+    s3_server_side_encryption: Literal[
+        "AES256",
+        "aws:kms",
+    ] | None = None
+
+    s3_kms_key_id: str | None = None
 
     task_mode: Literal[
         "inline",
@@ -166,6 +172,22 @@ class Settings(BaseSettings):
             ]
 
         return value
+
+    @field_validator(
+        "s3_server_side_encryption",
+        mode="before",
+    )
+    @classmethod
+    def normalize_s3_server_side_encryption(
+        cls,
+        value,
+    ):
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+
+        return normalized or None
 
     @field_validator(
         "jooble_domain",
