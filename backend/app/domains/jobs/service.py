@@ -661,76 +661,156 @@ def discover_for_candidate(
     limit_per_provider: int = 20,
     max_results: int = 50,
 ) -> dict:
-    candidate, _, preference = _candidate_evidence(
+    candidate, entries, preference = _candidate_evidence(
         db,
         user,
     )
 
-    if (
-        not preference
-        or (
-            not preference.target_titles
-            and not preference.job_categories
+    def add_unique(
+        values: list[str],
+        value: str | None,
+    ) -> None:
+        cleaned = str(
+            value or ""
+        ).strip()
+
+        if not cleaned:
+            return
+
+        if cleaned.casefold() in {
+            item.casefold()
+            for item in values
+        }:
+            return
+
+        values.append(cleaned)
+
+    # -------------------------------------------------------
+    # Discovery query priority:
+    #
+    # 1. Explicit target titles
+    # 2. Candidate headline
+    # 3. Job categories
+    # 4. Verified experience
+    # 5. Verified skills
+    #
+    # Preferences improve discovery but are not mandatory.
+    # -------------------------------------------------------
+
+    search_queries: list[str] = []
+
+    if preference:
+        for value in (
+            preference.target_titles
+            or []
+        ):
+            add_unique(
+                search_queries,
+                value,
+            )
+
+    if not search_queries:
+        add_unique(
+            search_queries,
+            candidate.headline,
         )
+
+    if (
+        not search_queries
+        and preference
     ):
+        for value in (
+            preference.job_categories
+            or []
+        ):
+            add_unique(
+                search_queries,
+                value,
+            )
+
+    if not search_queries:
+        for entry in entries:
+            if (
+                entry.entry_type
+                == "experience"
+            ):
+                add_unique(
+                    search_queries,
+                    entry.label,
+                )
+
+            if len(search_queries) >= 2:
+                break
+
+    if not search_queries:
+        verified_skills = [
+            entry.label.strip()
+            for entry in entries
+            if (
+                entry.entry_type == "skill"
+                and entry.label.strip()
+            )
+        ]
+
+        if verified_skills:
+            add_unique(
+                search_queries,
+                " ".join(
+                    verified_skills[:3]
+                ),
+            )
+
+    if not search_queries:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Set at least one target job title "
-                "or job category in Job Preferences "
+                "Add a professional headline, "
+                "target job title, job category, "
+                "or verified career evidence "
                 "before discovering jobs."
             ),
         )
 
-    search_queries: list[str] = []
-
-    for value in [
-        *preference.target_titles,
-        *preference.job_categories,
-    ]:
-        cleaned = str(value or "").strip()
-
-        if (
-            cleaned
-            and cleaned.casefold()
-            not in {
-                item.casefold()
-                for item in search_queries
-            }
-        ):
-            search_queries.append(cleaned)
-
+    # Keep external provider traffic bounded.
     search_queries = search_queries[:5]
 
-    # Search explicit cities/locations first, then preferred countries.
-    # This keeps the provider contract unchanged while allowing global
-    # discovery preferences to influence provider searches.
+    # -------------------------------------------------------
+    # Location fallback:
+    #
+    # preferred city -> current location ->
+    # preferred country -> broad provider search
+    # -------------------------------------------------------
+
     search_locations: list[str] = []
 
-    for value in [
-        *preference.locations[:3],
-        *preference.preferred_countries[:3],
-    ]:
-        cleaned = str(value or "").strip()
+    if preference:
+        for value in (
+            preference.locations
+            or []
+        )[:3]:
+            add_unique(
+                search_locations,
+                value,
+            )
 
-        if (
-            cleaned
-            and cleaned.casefold()
-            not in {
-                item.casefold()
-                for item in search_locations
-            }
-        ):
-            search_locations.append(cleaned)
+    add_unique(
+        search_locations,
+        candidate.location,
+    )
 
-    if not search_locations:
-        search_locations = [
-            candidate.location.strip()
-            if candidate.location
-            else ""
-        ]
+    if preference:
+        for value in (
+            preference.preferred_countries
+            or []
+        )[:2]:
+            add_unique(
+                search_locations,
+                value,
+            )
 
+    # Reserve the final search for a broad provider-level query.
     search_locations = search_locations[:5]
+    search_locations.append("")
 
     discovered: dict[
         uuid.UUID,
@@ -755,20 +835,22 @@ def discover_for_candidate(
             provider_status[name] = {
                 "enabled": False,
                 "count": 0,
+                "unique_count": 0,
             }
             continue
 
         provider_count = 0
+
         provider_discovered: dict[
             uuid.UUID,
             JobPosting,
         ] = {}
 
         try:
-            for title in search_queries:
+            for query in search_queries:
                 for location in search_locations:
                     provider_jobs = provider.search(
-                        title,
+                        query,
                         location,
                         limit_per_provider,
                     )
@@ -778,6 +860,7 @@ def discover_for_candidate(
                             db,
                             provider_job,
                         )
+
                         db.flush()
 
                         provider_discovered[
@@ -795,6 +878,9 @@ def discover_for_candidate(
             provider_status[name] = {
                 "enabled": True,
                 "count": provider_count,
+                "unique_count": len(
+                    provider_discovered
+                ),
                 "status": "ok",
             }
 
@@ -804,6 +890,7 @@ def discover_for_candidate(
             provider_status[name] = {
                 "enabled": True,
                 "count": 0,
+                "unique_count": 0,
                 "status": "error",
             }
 
@@ -2127,7 +2214,7 @@ def recommendations(
                 .nullslast(),
                 JobPosting.created_at.desc(),
             )
-            .limit(100)
+            .limit(500)
         )
     )
 

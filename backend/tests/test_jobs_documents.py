@@ -57,11 +57,57 @@ def test_candidate_job_discovery_uses_preferences_and_scores_results(client):
     assert all("match" in job for job in recommendations)
 
 
-def test_candidate_job_discovery_requires_target_title(client):
-    register_verified(client);seed_profile(client)
-    discover=client.post("/api/v1/jobs/discover",json={"limit_per_provider":10,"max_results":20})
-    assert discover.status_code==202,discover.text
-    task_id=discover.json()["data"]["task_id"]
-    task=client.get(f"/api/v1/tasks/{task_id}").json()["data"]
-    assert task["status"]=="failed"
-    assert task["error_code"]=="preferences_required"
+def test_candidate_job_discovery_falls_back_to_profile(client):
+    register_verified(client)
+    seed_profile(client)
+
+    discover = client.post(
+        "/api/v1/jobs/discover",
+        json={
+            "limit_per_provider": 10,
+            "max_results": 20,
+        },
+    )
+
+    assert discover.status_code == 202, discover.text
+
+    task_id = discover.json()["data"]["task_id"]
+
+    task_response = client.get(
+        f"/api/v1/tasks/{task_id}"
+    )
+
+    assert task_response.status_code == 200, task_response.text
+
+    task = task_response.json()["data"]
+
+    assert task["status"] == "succeeded", task
+    assert task["error_code"] is None
+    assert task["result"]["found"] >= 1
+
+
+def test_candidate_job_discovery_requires_profile_evidence(client):
+    register_verified(client)
+
+    discover = client.post(
+        "/api/v1/jobs/discover",
+        json={
+            "limit_per_provider": 10,
+            "max_results": 20,
+        },
+    )
+
+    assert discover.status_code == 202, discover.text
+
+    task_id = discover.json()["data"]["task_id"]
+
+    task_response = client.get(
+        f"/api/v1/tasks/{task_id}"
+    )
+
+    assert task_response.status_code == 200, task_response.text
+
+    task = task_response.json()["data"]
+
+    assert task["status"] == "failed"
+    assert task["error_code"] == "preferences_required"
