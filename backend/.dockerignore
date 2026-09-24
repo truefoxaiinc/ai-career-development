@@ -1,0 +1,10 @@
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+.coverage
+htmlcov
+.storage
+.careerpilot-storage
+*.db
+.env

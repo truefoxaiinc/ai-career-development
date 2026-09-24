@@ -53,14 +53,12 @@ from app.schemas.common import (
 
 from .schemas import (
     DiscoverJobsRequest,
-    ManualJobRequest,
     SaveJobRequest,
 )
 
 from .service import (
     _job_dict,
     calculate_match,
-    create_manual_job,
     get_job_for_user,
     match_dict,
     recommendations,
@@ -164,7 +162,7 @@ def sources(
     currently have active imported jobs.
 
     candidate_input is excluded because
-    those are private manually-added jobs,
+    those are private resume-tailoring targets,
     not external discovery providers.
     """
 
@@ -187,34 +185,6 @@ def sources(
     )
 
     return success(values)
-
-
-@router.post(
-    "/manual",
-    status_code=201,
-)
-def manual(
-    payload: ManualJobRequest,
-    user: Annotated[
-        User,
-        Depends(
-            require_verified_user
-        ),
-    ],
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-):
-    return success(
-        _job_dict(
-            create_manual_job(
-                db,
-                user,
-                payload,
-            )
-        )
-    )
 
 
 @router.post(

@@ -86,7 +86,11 @@ def delete_account(payload:DeleteAccountRequest,response:Response,user:Annotated
     c=candidate_for_user(db,user);files=list(db.scalars(select(UploadedFile).where(UploadedFile.candidate_id==c.id)))
     storage=get_storage(settings)
     for f in files:
-        try:storage.delete(f.storage_key)
-        except Exception:pass
+        try:
+            storage.delete(f.storage_key)
+        except Exception as exc:
+            # Keep the account and all remaining file references intact so
+            # the owner can retry deletion after the storage outage clears.
+            raise HTTPException(status_code=503,detail="Account files could not be cleaned up; retry account deletion later") from exc
     db.add(AuditLog(user_id=None,action="account.deleted",resource_type="user",resource_id=None,metadata_json={"deidentified":True}))
     db.delete(user);db.commit();clear_auth_cookies(response,settings);return success({"deleted":True})

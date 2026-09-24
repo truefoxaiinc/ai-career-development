@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 SuggestionCategory = Literal[
     "missing_information", "weak_summary", "skills", "achievement_quantification",
     "grammar_clarity", "ats_keywords", "formatting", "job_specific",
+    "contact", "experience", "education", "projects", "certifications",
+    "languages", "cover_letter_section",
 ]
 
 

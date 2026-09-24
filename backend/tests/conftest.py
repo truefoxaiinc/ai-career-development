@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.database import Base, engine
 import app.models.entities  # noqa: F401
+from app.models.entities import JobPosting
 from app.main import app
 
 
@@ -43,6 +44,8 @@ def register_verified(client: TestClient, email: str = "candidate@example.com", 
     assert token
     verify = client.post("/api/v1/auth/verify-email", json={"token": token})
     assert verify.status_code == 200, verify.text
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert login.status_code == 200, login.text
     return r.json()["data"]["user"]
 
 
@@ -63,9 +66,42 @@ def seed_profile(client: TestClient):
 
 
 def manual_job(client: TestClient):
-    r = client.post("/api/v1/jobs/manual", json={"title": "Staff Frontend Engineer", "company": "Northstar Labs", "location": "Bengaluru", "description": "We need 5+ years of React, TypeScript, Accessibility and GraphQL experience. Lead frontend platform work and improve performance.", "apply_url": "https://careers.example.com/job/123"})
-    assert r.status_code == 201, r.text
-    return r.json()["data"]
+    """Seed an external-style listing for tests that need a persisted job.
+
+    Candidate-entered descriptions belong to Resume Studio. The public Jobs API
+    only imports listings through discovery, so workflow tests should seed their
+    database dependency instead of calling the retired /jobs/manual endpoint.
+    """
+    from uuid import uuid4
+
+    from app.core.database import SessionLocal
+
+    job = JobPosting(
+        source="test_provider",
+        external_id=str(uuid4()),
+        title="Staff Frontend Engineer",
+        company="Northstar Labs",
+        location="Bengaluru",
+        description=("We need 5+ years of React, TypeScript, Accessibility "
+                     "and GraphQL experience. Lead frontend platform work "
+                     "and improve performance."),
+        requirements={"skills": ["React", "TypeScript", "Accessibility", "GraphQL"]},
+        apply_url="https://careers.example.com/job/123",
+        is_active=True,
+        ingestion_meta={"test_fixture": True},
+    )
+    with SessionLocal() as db:
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {
+            "id": str(job.id),
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "description": job.description,
+            "apply_url": job.apply_url,
+        }
 
 
 def generate_and_approve(client: TestClient, job_id: str, kind: str):
@@ -79,3 +115,12 @@ def generate_and_approve(client: TestClient, job_id: str, kind: str):
     approved = client.post(f"/api/v1/documents/{doc_id}/approve")
     assert approved.status_code == 200, approved.text
     return approved.json()["data"]
+
+
+def generate_document(client: TestClient, job_id: str, kind: str):
+    """Generate and return a document without assuming it can be approved."""
+    r = client.post("/api/v1/documents/generate", json={"job_id": job_id, "document_type": kind, "template": "ats"})
+    assert r.status_code == 202, r.text
+    task = client.get(f"/api/v1/tasks/{r.json()['data']['task_id']}").json()["data"]
+    assert task["status"] == "succeeded", task
+    return client.get(f"/api/v1/documents/{task['result']['document_id']}").json()["data"]

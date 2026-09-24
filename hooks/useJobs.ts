@@ -157,15 +157,6 @@ export function useDiscoverJobs() {
           task.status ===
           'failed'
         ) {
-          if (
-            task.error_code ===
-            'preferences_required'
-          ) {
-            throw new Error(
-              'Set at least one target job title or job category in Preferences before discovering jobs.',
-            );
-          }
-
           throw new Error(
             'Job discovery failed. Please try again.',
           );

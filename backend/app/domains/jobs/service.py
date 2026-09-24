@@ -661,156 +661,10 @@ def discover_for_candidate(
     limit_per_provider: int = 20,
     max_results: int = 50,
 ) -> dict:
-    candidate, entries, preference = _candidate_evidence(
-        db,
-        user,
-    )
-
-    def add_unique(
-        values: list[str],
-        value: str | None,
-    ) -> None:
-        cleaned = str(
-            value or ""
-        ).strip()
-
-        if not cleaned:
-            return
-
-        if cleaned.casefold() in {
-            item.casefold()
-            for item in values
-        }:
-            return
-
-        values.append(cleaned)
-
-    # -------------------------------------------------------
-    # Discovery query priority:
-    #
-    # 1. Explicit target titles
-    # 2. Candidate headline
-    # 3. Job categories
-    # 4. Verified experience
-    # 5. Verified skills
-    #
-    # Preferences improve discovery but are not mandatory.
-    # -------------------------------------------------------
-
-    search_queries: list[str] = []
-
-    if preference:
-        for value in (
-            preference.target_titles
-            or []
-        ):
-            add_unique(
-                search_queries,
-                value,
-            )
-
-    if not search_queries:
-        add_unique(
-            search_queries,
-            candidate.headline,
-        )
-
-    if (
-        not search_queries
-        and preference
-    ):
-        for value in (
-            preference.job_categories
-            or []
-        ):
-            add_unique(
-                search_queries,
-                value,
-            )
-
-    if not search_queries:
-        for entry in entries:
-            if (
-                entry.entry_type
-                == "experience"
-            ):
-                add_unique(
-                    search_queries,
-                    entry.label,
-                )
-
-            if len(search_queries) >= 2:
-                break
-
-    if not search_queries:
-        verified_skills = [
-            entry.label.strip()
-            for entry in entries
-            if (
-                entry.entry_type == "skill"
-                and entry.label.strip()
-            )
-        ]
-
-        if verified_skills:
-            add_unique(
-                search_queries,
-                " ".join(
-                    verified_skills[:3]
-                ),
-            )
-
-    if not search_queries:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Add a professional headline, "
-                "target job title, job category, "
-                "or verified career evidence "
-                "before discovering jobs."
-            ),
-        )
-
-    # Keep external provider traffic bounded.
-    search_queries = search_queries[:5]
-
-    # -------------------------------------------------------
-    # Location fallback:
-    #
-    # preferred city -> current location ->
-    # preferred country -> broad provider search
-    # -------------------------------------------------------
-
-    search_locations: list[str] = []
-
-    if preference:
-        for value in (
-            preference.locations
-            or []
-        )[:3]:
-            add_unique(
-                search_locations,
-                value,
-            )
-
-    add_unique(
-        search_locations,
-        candidate.location,
-    )
-
-    if preference:
-        for value in (
-            preference.preferred_countries
-            or []
-        )[:2]:
-            add_unique(
-                search_locations,
-                value,
-            )
-
-    # Reserve the final search for a broad provider-level query.
-    search_locations = search_locations[:5]
-    search_locations.append("")
+    # Synchronize the provider's broad feed. Candidate preferences belong in
+    # recommendations(), so a user's profile never limits the shared catalog.
+    search_queries = [""]
+    search_locations = [""]
 
     discovered: dict[
         uuid.UUID,
@@ -967,11 +821,7 @@ def process_job_discovery_task(
     except HTTPException as exc:
         task.status = "failed"
         task.progress = 100
-        task.error_code = (
-            "preferences_required"
-            if exc.status_code == 422
-            else "job_discovery_failed"
-        )
+        task.error_code = "job_discovery_failed"
         task.result = {}
         db.commit()
         return
@@ -1013,8 +863,8 @@ def create_manual_job(
         description=description,
     )
 
-    # Candidate-entered jobs are private. Only compare the new posting
-    # with active manual jobs created by the same candidate.
+    # Manually supplied job targets are private. Only compare with active
+    # targets created by the same candidate.
     existing_jobs = list(
         db.scalars(
             select(JobPosting)
@@ -1303,7 +1153,7 @@ def search_jobs(
         JobPosting.is_active.is_(True)
     ]
 
-    # candidate_input jobs are private to the candidate that created them.
+    # candidate_input jobs are private resume-tailoring targets.
     filters.append(
         or_(
             JobPosting.source

@@ -1,4 +1,4 @@
-from conftest import generate_and_approve,manual_job,register_verified,seed_profile
+from conftest import generate_and_approve,generate_document,manual_job,register_verified,seed_profile
 
 def test_job_search_matching_save_and_document_exports(client):
     register_verified(client);seed_profile(client);job=manual_job(client)
@@ -9,7 +9,9 @@ def test_job_search_matching_save_and_document_exports(client):
     assert client.post(f"/api/v1/jobs/{job['id']}/save",json={"note":"Priority"}).status_code==201
     assert len(client.get("/api/v1/jobs/saved").json()["data"])==1
     resume=generate_and_approve(client,job["id"],"resume")
-    cover=generate_and_approve(client,job["id"],"cover_letter")
+    cover=generate_document(client,job["id"],"cover_letter")
+    assert cover["claim_report"]["status"] == "blocked"
+    assert client.post(f"/api/v1/documents/{cover['id']}/approve").status_code==409
     pdf=client.get(f"/api/v1/documents/{resume['id']}/download?format=pdf")
     docx=client.get(f"/api/v1/documents/{resume['id']}/download?format=docx")
     assert pdf.status_code==200 and pdf.content.startswith(b"%PDF")
@@ -22,6 +24,13 @@ def test_anti_fabrication_blocks_unsupported_edited_claim(client):
     data=edited.json()["data"]
     assert data["claim_report"]["unsupported_claims"]>=1
     assert client.post(f"/api/v1/documents/{data['id']}/approve").status_code==409
+    assert client.post(f"/api/v1/documents/{data['id']}/approve",json={"manual_override":True}).status_code==422
+    approved=client.post(f"/api/v1/documents/{data['id']}/approve",json={"manual_override":True,"acknowledged_unsupported_claims":True})
+    assert approved.status_code==200
+    assert approved.json()["data"]["claim_report"]["manual_approval"] is True
+    assert client.get(f"/api/v1/documents/{data['id']}/download?format=pdf").status_code==200
+    assert client.delete(f"/api/v1/documents/{data['id']}").status_code==200
+    assert client.get(f"/api/v1/documents/{data['id']}").status_code==404
 
 
 def test_candidate_job_discovery_uses_preferences_and_scores_results(client):
@@ -86,7 +95,7 @@ def test_candidate_job_discovery_falls_back_to_profile(client):
     assert task["result"]["found"] >= 1
 
 
-def test_candidate_job_discovery_requires_profile_evidence(client):
+def test_candidate_job_discovery_syncs_broad_feed_without_preferences(client):
     register_verified(client)
 
     discover = client.post(
@@ -109,5 +118,6 @@ def test_candidate_job_discovery_requires_profile_evidence(client):
 
     task = task_response.json()["data"]
 
-    assert task["status"] == "failed"
-    assert task["error_code"] == "preferences_required"
+    assert task["status"] == "succeeded", task
+    assert task["error_code"] is None
+    assert task["result"]["found"] >= 1

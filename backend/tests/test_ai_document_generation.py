@@ -98,7 +98,7 @@ def test_grounded_ai_document_uses_litellm_generator(
 
     document = service.generate_document(
         db=db,
-        user=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4(), email="candidate@example.com"),
         settings=Settings(),
         job=_job(),
         document_type="resume",
@@ -159,7 +159,7 @@ def test_document_ai_timeout_falls_back_to_deterministic(
 
     document = service.generate_document(
         db=db,
-        user=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4(), email="candidate@example.com"),
         settings=Settings(),
         job=_job(),
         document_type="resume",
@@ -214,7 +214,7 @@ def test_unsupported_ai_claim_remains_blocked(
 
     document = service.generate_document(
         db=db,
-        user=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4(), email="candidate@example.com"),
         settings=Settings(),
         job=_job(),
         document_type="resume",
@@ -277,7 +277,7 @@ def test_disabled_ai_keeps_deterministic_generation(
 
     document = service.generate_document(
         db=db,
-        user=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4(), email="candidate@example.com"),
         settings=Settings(),
         job=_job(),
         document_type="cover_letter",

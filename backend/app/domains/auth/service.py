@@ -54,9 +54,10 @@ def issue_email_token(db: Session, user: User, purpose: str, ttl_minutes: int) -
 
 def issue_session(db: Session, user: User, settings: Settings) -> tuple[str, str]:
     raw_refresh = new_opaque_token()
-    db.add(RefreshSession(user_id=user.id, token_hash=hash_token(raw_refresh), expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_days)))
+    session_id = uuid.uuid4()
+    db.add(RefreshSession(id=session_id, user_id=user.id, token_hash=hash_token(raw_refresh), expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_days)))
     user.last_login_at = datetime.now(UTC)
-    return create_access_token(user, settings), raw_refresh
+    return create_access_token(user, settings, session_id), raw_refresh
 
 
 def register(db: Session, payload: RegisterRequest, settings: Settings) -> tuple[User, str | None]:

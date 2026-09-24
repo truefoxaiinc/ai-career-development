@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
-from app.models.entities import AdminRole, User
+from app.models.entities import AdminRole, RefreshSession, User
 
 PBKDF2_ITERATIONS = 310_000
 
@@ -50,10 +50,11 @@ def new_opaque_token() -> str:
     return secrets.token_urlsafe(48)
 
 
-def create_access_token(user: User, settings: Settings) -> str:
+def create_access_token(user: User, settings: Settings, session_id: uuid.UUID) -> str:
     now = datetime.now(UTC)
     claims = {
         "sub": str(user.id),
+        "sid": str(session_id),
         "email": user.email,
         "role": user.role,
         "iat": int(now.timestamp()),
@@ -96,8 +97,17 @@ def get_current_user(
     claims = decode_access_token(token, settings)
     try:
         user_id = uuid.UUID(claims["sub"])
+        session_id = uuid.UUID(claims["sid"])
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session subject") from exc
+    session = db.get(RefreshSession, session_id)
+    if not session or session.user_id != user_id or session.revoked_at:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active")
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at < datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active")
     user = db.get(User, user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")

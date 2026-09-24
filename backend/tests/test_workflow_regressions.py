@@ -15,19 +15,6 @@ from conftest import (
 )
 
 
-MANUAL_JOB_PAYLOAD = {
-    "title": "Staff Frontend Engineer",
-    "company": "Northstar Labs",
-    "location": "Bengaluru",
-    "description": (
-        "We need 5+ years of React, TypeScript, Accessibility "
-        "and GraphQL experience. Lead frontend platform work "
-        "and improve performance."
-    ),
-    "apply_url": "https://careers.example.com/job/123",
-}
-
-
 def _approved_application(client):
     register_verified(client)
     seed_profile(client)
@@ -278,127 +265,36 @@ def test_applied_application_cannot_move_back_to_saved(
     assert data["applied_at"] is not None
 
 
-def test_manual_duplicate_prefers_workflow_backed_job(
+def test_resume_studio_reuses_duplicate_candidate_target(
     client,
 ):
     register_verified(client)
     seed_profile(client)
 
-    # Create the original candidate-entered job.
-    original = manual_job(client)
+    # Create the original private Resume Studio target.
+    target_payload = {
+        "title": "Staff Frontend Engineer",
+        "company": "Northstar Labs",
+        "description": (
+            "We need 5+ years of React, TypeScript, Accessibility "
+            "and GraphQL experience. Lead frontend platform work "
+            "and improve performance."
+        ),
+        "document_type": "resume",
+    }
+    first_target = client.post("/api/v1/resume-studio/target", json=target_payload)
+    assert first_target.status_code == 202, first_target.text
+    original = {"id": first_target.json()["data"]["job_id"]}
 
     original_id = uuid.UUID(
         original["id"]
     )
 
-    # Insert a legacy duplicate directly into the database.
-    #
-    # This simulates the duplicate rows that existed before
-    # our deduplication protection was introduced.
-    with SessionLocal() as db:
-        original_job = db.get(
-            JobPosting,
-            original_id,
-        )
+    replay = client.post("/api/v1/resume-studio/target", json=target_payload)
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["data"]["job_id"] == original["id"]
 
-        assert original_job is not None
-
-        duplicate = JobPosting(
-            source=original_job.source,
-            external_id=str(
-                uuid.uuid4()
-            ),
-            title=original_job.title,
-            company=original_job.company,
-            location=original_job.location,
-            remote_mode=original_job.remote_mode,
-            description=original_job.description,
-            requirements=original_job.requirements,
-            salary_min=original_job.salary_min,
-            salary_max=original_job.salary_max,
-            salary_currency=(
-                original_job.salary_currency
-            ),
-            employment_type=(
-                original_job.employment_type
-            ),
-            apply_url=original_job.apply_url,
-            posted_at=original_job.posted_at,
-            expires_at=original_job.expires_at,
-            is_active=True,
-            ingestion_meta=dict(
-                original_job.ingestion_meta
-                or {}
-            ),
-        )
-
-        db.add(duplicate)
-        db.commit()
-        db.refresh(duplicate)
-
-        duplicate_id = str(
-            duplicate.id
-        )
-
-    assert duplicate_id != original["id"]
-
-    # Put real workflow history on the newer duplicate.
-    resume = generate_and_approve(
-        client,
-        duplicate_id,
-        "resume",
-    )
-
-    application_response = client.post(
-        "/api/v1/applications",
-        json={
-            "job_id": duplicate_id,
-            "resume_document_id": resume["id"],
-            "cover_letter_document_id": None,
-            "notes": (
-                "Canonical workflow-backed job"
-            ),
-        },
-    )
-
-    assert (
-        application_response.status_code
-        == 201
-    ), application_response.text
-
-    application = (
-        application_response.json()["data"]
-    )
-
-    approval = client.post(
-        (
-            f"/api/v1/applications/"
-            f"{application['id']}/approve"
-        ),
-        json={
-            "approved": True,
-        },
-    )
-
-    assert approval.status_code == 200
-
-    # Submit exactly the same manual job again.
-    #
-    # Reference-aware deduplication should return the job
-    # carrying the real application/document workflow.
-    response = client.post(
-        "/api/v1/jobs/manual",
-        json=MANUAL_JOB_PAYLOAD,
-    )
-
-    assert response.status_code == 201, response.text
-
-    returned = response.json()["data"]
-
-    assert returned["id"] == duplicate_id
-
-    # Most importantly, deduplication must not insert a third
-    # JobPosting row.
+    # Reusing the same candidate target does not create a duplicate row.
     with SessionLocal() as db:
         count = db.scalar(
             select(func.count())
@@ -407,14 +303,10 @@ def test_manual_duplicate_prefers_workflow_backed_job(
                 JobPosting.source
                 == "candidate_input",
                 JobPosting.title
-                == MANUAL_JOB_PAYLOAD[
-                    "title"
-                ],
+                == target_payload["title"],
                 JobPosting.company
-                == MANUAL_JOB_PAYLOAD[
-                    "company"
-                ],
+                == target_payload["company"],
             )
         )
 
-    assert count == 2
+    assert count == 1

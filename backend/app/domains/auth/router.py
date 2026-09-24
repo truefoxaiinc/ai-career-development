@@ -33,13 +33,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", status_code=201)
 def register_endpoint(payload: RegisterRequest, response: Response, db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
     user, dev_token = register(db, payload, settings)
-    access, refresh = issue_session(db, user, settings); db.commit(); set_auth_cookies(response, access, refresh, settings)
     return success({"user": UserView.model_validate(user).model_dump(mode="json"), "email_verification_required": True, "dev_verification_token": dev_token})
 
 
 @router.post("/login")
 def login_endpoint(payload: LoginRequest, response: Response, db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
     user = authenticate(db, payload.email, payload.password)
+    if not user.is_email_verified:
+        clear_auth_cookies(response, settings)
+        return success({"user": UserView.model_validate(user).model_dump(mode="json"), "email_verification_required": True})
     access, refresh = issue_session(db, user, settings); db.commit(); set_auth_cookies(response, access, refresh, settings)
     return success({"user": UserView.model_validate(user).model_dump(mode="json"), "email_verification_required": not user.is_email_verified})
 
@@ -62,8 +64,9 @@ def session_endpoint(user: Annotated[User, Depends(get_current_user)]):
 
 
 @router.post("/change-password")
-def change_password_endpoint(payload: ChangePasswordRequest, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+def change_password_endpoint(payload: ChangePasswordRequest, response: Response, user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
     change_password(db, user, payload.current_password, payload.new_password)
+    access, refresh = issue_session(db, user, settings); db.commit(); set_auth_cookies(response, access, refresh, settings)
     return success({"message":"Password changed"})
 
 

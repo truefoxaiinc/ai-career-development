@@ -1,9 +1,16 @@
 import {test,expect} from '@playwright/test';
 
+test('direct access to protected route groups redirects when logged out', async ({page}) => {
+ for (const path of ['/dashboard/profile', '/dashboard/jobs/search', '/admin/system', '/onboarding']) {
+  await page.goto(path);
+  await expect(page).toHaveURL(/\/login\?next=/);
+ }
+});
+
 test('critical resume studio flow is keyboard accessible',async({page})=>{
  let suggestions:any[]=[];let documents:any[]=[];let approved=false;
  await page.route('**/api/v1/**',async route=>{const url=new URL(route.request().url());const path=url.pathname;let data:any={};
-  if(path.endsWith('/auth/session'))data={user:{id:'u1'}};
+  if(path.endsWith('/auth/session'))data={user:{id:'u1',is_email_verified:true}};
   else if(path.endsWith('/profile'))data={id:'c1',name:'Candidate',headline:'Engineer',location:'',phone:'',links:{},profile_summary:'',profile_completion:60,entries:[]};
   else if(path.endsWith('/resume-studio/overview'))data={resumes:[],max_upload_bytes:10485760,supported_types:['application/pdf']};
   else if(path.endsWith('/resume-studio/resumes')&&route.request().method()==='POST')data={id:'r1',filename:'resume.pdf',mime_type:'application/pdf',size_bytes:100,content_hash:'x',version:1,status:'completed',uploaded_at:new Date().toISOString()};
@@ -23,7 +30,7 @@ test('critical resume studio flow is keyboard accessible',async({page})=>{
  });
  await page.context().addCookies([{name:'cp_access',value:'test',domain:'127.0.0.1',path:'/'}]);await page.goto('/dashboard/resume-studio');
  const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:/upload resume/i}).click();(await chooser).setFiles({name:'resume.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-test')});
- await expect(page.getByText('TypeScript')).toBeVisible();await page.getByRole('button',{name:'Confirm'}).click();await page.getByRole('button',{name:'Generate',exact:true}).click();await expect(page.getByText('Make the summary clearer')).toBeVisible();
- await page.getByRole('button',{name:'Apply to draft'}).click();await page.getByRole('combobox',{name:'Source'}).selectOption('manual');await page.getByRole('textbox',{name:'Job title'}).fill('Staff Engineer');await page.getByRole('textbox',{name:'Company'}).fill('Northstar');await page.getByRole('textbox',{name:'Job description'}).fill('We need a TypeScript engineer who builds accessible products and reliable systems.');await page.getByRole('combobox',{name:'Generate'}).selectOption('cover_letter');await page.getByRole('button',{name:/generate grounded draft/i}).click();
+ await expect(page.getByText('TypeScript')).toBeVisible();await page.getByRole('button',{name:'Confirm'}).click();
+ await page.getByRole('combobox',{name:'Source'}).selectOption('manual');await page.getByRole('textbox',{name:'Job title'}).fill('Staff Engineer');await page.getByRole('textbox',{name:'Company'}).fill('Northstar');await page.getByRole('textbox',{name:'Job description'}).fill('We need a TypeScript engineer who builds accessible products and reliable systems.');await page.getByRole('combobox',{name:'Generate'}).selectOption('cover_letter');await page.getByRole('button',{name:/generate grounded draft/i}).click();
  await expect(page.getByText(/Cover Letter · version 1/)).toBeVisible();await page.getByRole('radio',{name:/Modern preview/}).press('Enter');await page.getByRole('button',{name:'Approve'}).click();const download=page.waitForEvent('download');await page.getByRole('button',{name:'PDF'}).click();expect((await download).suggestedFilename()).toMatch(/\.pdf$/);
 });

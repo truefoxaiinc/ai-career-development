@@ -424,6 +424,7 @@ export function SignupPage() {
           token: out.dev_verification_token,
         });
 
+        await api.post('/auth/login', { email: email.trim(), password });
         push('Development account verified');
         router.push('/onboarding');
         return;

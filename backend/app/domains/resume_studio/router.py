@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -13,6 +13,7 @@ from app.domains.documents.service import document_dict
 from app.domains.jobs.service import calculate_match, get_job_for_user, match_dict
 from app.domains.profiles.service import store_resume
 from app.domains.tasks.service import create_task, dispatch_task
+from app.integrations.storage import get_storage
 from app.models.entities import AsyncJob, GeneratedDocument, JobPosting, ProfileEntry, ResumeSuggestion, UploadedFile, User
 from app.repositories.common import candidate_for_user
 from app.schemas.common import success
@@ -40,6 +41,8 @@ async def upload(background_tasks: BackgroundTasks, user: Annotated[User, Depend
     existing = db.scalar(select(UploadedFile).where(UploadedFile.candidate_id == candidate.id, UploadedFile.kind == "resume", UploadedFile.sha256 == digest).order_by(UploadedFile.created_at.desc()))
     if existing:
         task = db.scalar(select(AsyncJob).where(AsyncJob.user_id == user.id, AsyncJob.kind == "resume_parse").order_by(AsyncJob.created_at.desc()))
+        if task and task.payload.get("file_id") != str(existing.id):
+            task = None
         return success({**resume_dict(existing, task), "idempotent_replay": True})
     record = store_resume(db, user, file, data, settings)
     record.version = int(db.scalar(select(func.max(UploadedFile.version)).where(UploadedFile.candidate_id == candidate.id, UploadedFile.kind == "resume", UploadedFile.id != record.id)) or 0) + 1
@@ -56,6 +59,47 @@ def resume_status(file_id: uuid.UUID, user: Annotated[User, Depends(require_veri
     tasks = list(db.scalars(select(AsyncJob).where(AsyncJob.user_id == user.id, AsyncJob.kind == "resume_parse").order_by(AsyncJob.created_at.desc())))
     task = next((t for t in tasks if t.payload.get("file_id") == str(file_id)), None)
     return success(resume_dict(record, task))
+
+
+@router.post("/resumes/{file_id}/retry", status_code=202)
+def retry_resume(file_id: uuid.UUID, background_tasks: BackgroundTasks, user: Annotated[User, Depends(require_verified_user)], db: Annotated[Session, Depends(get_db)]):
+    candidate = candidate_for_user(db, user)
+    record = db.get(UploadedFile, file_id)
+    if not record or record.candidate_id != candidate.id or record.kind != "resume":
+        raise HTTPException(404, "Resume not found")
+    if record.processing_status != "failed":
+        raise HTTPException(409, "Only failed resume processing can be retried")
+    record.processing_status = "queued"
+    record.extraction_error = None
+    task = create_task(db, user.id, "resume_parse", {"file_id": str(record.id)})
+    db.commit()
+    dispatch_task(background_tasks, task.id)
+    return success(resume_dict(record, task))
+
+
+@router.delete("/resumes/{file_id}")
+def delete_resume(file_id: uuid.UUID, user: Annotated[User, Depends(require_verified_user)], db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
+    candidate = candidate_for_user(db, user)
+    record = db.get(UploadedFile, file_id)
+    if not record or record.candidate_id != candidate.id or record.kind != "resume":
+        raise HTTPException(404, "Resume not found")
+    active_task = db.scalar(select(AsyncJob).where(
+        AsyncJob.user_id == user.id,
+        AsyncJob.kind == "resume_parse",
+        AsyncJob.status.in_(["queued", "running"]),
+    ).order_by(AsyncJob.created_at.desc()))
+    if active_task and active_task.payload.get("file_id") == str(record.id):
+        raise HTTPException(409, "Wait for resume processing to finish before deleting it")
+    try:
+        # Delete the private object before its database reference. Storage
+        # deletion is idempotent; on failure the record remains retryable.
+        get_storage(settings).delete(record.storage_key)
+    except Exception as exc:
+        raise HTTPException(503, "Resume file cleanup failed; the resume is still available to retry deletion") from exc
+    db.execute(delete(ProfileEntry).where(ProfileEntry.candidate_id == candidate.id, ProfileEntry.source_file_id == record.id))
+    db.delete(record)
+    db.commit()
+    return success({"deleted": True})
 
 
 @router.get("/resumes/{file_id}/facts")
@@ -111,6 +155,16 @@ def select_template(document_id: uuid.UUID, payload: TemplateSelection, user: An
 def target(payload: TargetRequest, background_tasks: BackgroundTasks, user: Annotated[User, Depends(require_verified_user)], db: Annotated[Session, Depends(get_db)]):
     job = get_job_for_user(db, user, payload.job_id) if payload.job_id else create_manual_target(db, user, payload.title or "Target role", payload.company or "Target company", payload.description or "")
     if not payload.job_id and len(payload.description or "") < 30: raise HTTPException(422, "A manual job description must contain at least 30 characters")
+    if payload.source_file_id:
+        candidate = candidate_for_user(db, user)
+        uploaded = db.get(UploadedFile, payload.source_file_id)
+        if not uploaded or uploaded.candidate_id != candidate.id or uploaded.kind != "resume":
+            raise HTTPException(404, "Selected uploaded resume was not found")
+        if uploaded.processing_status != "completed":
+            raise HTTPException(409, "Wait for resume analysis to finish before generating")
+        extracted = list(db.scalars(select(ProfileEntry).where(ProfileEntry.candidate_id == candidate.id, ProfileEntry.source_file_id == uploaded.id)))
+        if any(not item.verified for item in extracted):
+            raise HTTPException(409, "Review and confirm or reject all extracted resume details before generating")
     if payload.idempotency_key:
         tasks = list(db.scalars(select(AsyncJob).where(AsyncJob.user_id == user.id, AsyncJob.kind == "document_generate").order_by(AsyncJob.created_at.desc()).limit(100)))
         prior = next((t for t in tasks if t.payload.get("idempotency_key") == payload.idempotency_key), None)

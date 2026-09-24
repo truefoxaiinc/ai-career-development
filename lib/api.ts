@@ -11,6 +11,7 @@ async function raw<T>(path:string,init:RequestInit={},retry=true):Promise<T>{
  if(response.status===401&&retry&&path!='/auth/refresh'&&typeof window!=='undefined'){
    const refreshed=await fetch(`${API_BASE}/auth/refresh`,{method:'POST',credentials:'include'});
    if(refreshed.ok)return raw<T>(path,init,false);
+   try{await fetch(`${API_BASE}/auth/logout`,{method:'POST',credentials:'include'})}catch{}
  }
  if(!response.ok)throw await parseError(response);
  const body=await response.json();return body.data as T;
