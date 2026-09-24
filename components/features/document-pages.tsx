@@ -1,12 +1,14 @@
 'use client';
 
+import { ResumePaper } from '@/components/resume-studio/resume-paper';
+
 import Link from 'next/link';
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, CheckCircle2, Clock3,
-  Download, FilePlus2, FileText, Layers3, PenLine, ShieldAlert, ShieldCheck,
-  Sparkles, WandSparkles
+  Download, FilePlus2, FileText, Layers3, PenLine, RefreshCw, ShieldAlert, ShieldCheck,
+  Sparkles, Trash2, WandSparkles
 } from 'lucide-react';
 
 import { api, downloadDocument } from '@/lib/api';
@@ -16,6 +18,7 @@ import {
   ProgressBar, Select, Skeleton, Textarea
 } from '@/components/ui';
 import { useToast } from '@/components/toast';
+import { useStudioOverview } from '@/hooks/useResumeStudio';
 
 const err = (e: unknown) => e instanceof Error ? e.message : 'Request failed';
 
@@ -58,10 +61,25 @@ function DocumentsNav({ active }: { active: 'library' | 'resume' | 'cover-letter
 }
 
 export function DocumentLibraryPage() {
+  const client = useQueryClient();
+  const { push } = useToast();
   const q = useQuery({
     queryKey: ['documents'],
     queryFn: () => api.get<GeneratedDocument[]>('/documents'),
   });
+
+  const remove = useMutation({
+    mutationFn: (documentId: string) => api.delete<{deleted: boolean; document_id: string}>(`/documents/${documentId}`),
+    onSuccess: (_, documentId) => {
+      client.setQueryData<GeneratedDocument[]>(['documents'], current => current?.filter(doc => doc.id !== documentId));
+      push('Document deleted');
+    },
+    onError: error => push(err(error), 'error'),
+  });
+
+  function requestDelete(doc: GeneratedDocument) {
+    if (window.confirm(`Delete “${doc.title}” version ${doc.version}? This cannot be undone.`)) remove.mutate(doc.id);
+  }
 
   const metrics = useMemo(() => {
     const docs = q.data ?? [];
@@ -114,6 +132,17 @@ export function DocumentLibraryPage() {
         </div>
       </section>
 
+      <Panel className="mb-5 border-border bg-surface-2/50 p-4">
+        <div className="flex items-start gap-3">
+          <ShieldCheck size={17} className="mt-0.5 shrink-0 text-indigo-400" />
+          <div>
+            <h2 className="text-13 font-semibold">What do these claim statuses mean?</h2>
+            <p className="mt-1 text-12 leading-5 text-text-secondary"><strong className="text-emerald-400">Passed</strong> means factual sentences checked against your confirmed profile have supporting evidence. <strong className="text-red-400">Needs review</strong> means one or more sentences could not be matched to confirmed facts. Open the document to review flagged claims, correct or remove anything inaccurate, then save a new version. Documents with unsupported claims cannot be approved or downloaded.</p>
+            <p className="mt-2 text-[11px] leading-5 text-text-tertiary">A flag means the checker could not find enough matching evidence; it does not automatically mean the statement is false. Confirm relevant profile facts and try again.</p>
+          </div>
+        </div>
+      </Panel>
+
       <div className="mb-5 grid gap-3 md:grid-cols-3">
         <FeatureMetric icon={ShieldCheck} label="Grounding" value="Claim checked" color="emerald" />
         <FeatureMetric icon={Layers3} label="Versioning" value="Immutable" color="indigo" />
@@ -132,14 +161,14 @@ export function DocumentLibraryPage() {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {q.data.map(doc => <DocumentCard key={doc.id} doc={doc} />)}
+          {q.data.map(doc => <DocumentCard key={doc.id} doc={doc} deleting={remove.isPending && remove.variables === doc.id} onDelete={() => requestDelete(doc)} />)}
         </div>
       )}
     </>
   );
 }
 
-function DocumentCard({ doc }: { doc: GeneratedDocument }) {
+function DocumentCard({ doc, deleting, onDelete }: { doc: GeneratedDocument; deleting: boolean; onDelete: () => void }) {
   const state = docState(doc);
   const config = {
     approved: {
@@ -165,13 +194,12 @@ function DocumentCard({ doc }: { doc: GeneratedDocument }) {
   const Icon = config.icon;
 
   return (
-    <Link
-      href={`/dashboard/documents/${kindRoute(doc.document_type)}/${doc.id}`}
+    <article
       className="career-document-card group overflow-hidden rounded-[20px] border border-border bg-surface-1 transition duration-300 hover:-translate-y-1 hover:border-border-strong hover:shadow-[0_20px_70px_rgba(0,0,0,.10)]"
     >
       <div className={`h-[2px] bg-gradient-to-r ${config.line}`} />
 
-      <div className="p-5 md:p-6">
+      <Link href={`/dashboard/documents/${kindRoute(doc.document_type)}/${doc.id}`} className="block p-5 md:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-[11px] border border-indigo-500/15 bg-indigo-500/[0.08] text-indigo-400">
@@ -217,27 +245,29 @@ function DocumentCard({ doc }: { doc: GeneratedDocument }) {
         </div>
 
         <div className="mt-5 grid grid-cols-3 gap-2">
-          <Meta label="Claims" value={doc.claim_report.status}/>
-          <Meta
-            label="Unsupported"
-            value={String(doc.claim_report.unsupported_claims)}
-            warning={doc.claim_report.unsupported_claims > 0}
-          />
+          <Meta label="Claim check" value={doc.claim_report.status === 'passed' && doc.claim_report.unsupported_claims === 0 ? 'Passed' : 'Needs review'}/>
+          <Meta label="To review" value={String(doc.claim_report.unsupported_claims)} warning={doc.claim_report.unsupported_claims > 0}/>
           <Meta label="Created" value={new Date(doc.created_at).toLocaleDateString()}/>
         </div>
-      </div>
+      </Link>
 
       <div className="flex items-center justify-between border-t border-border bg-surface-2/25 px-5 py-3 md:px-6">
-        <span className="text-[10px] text-text-secondary">Open document workspace</span>
-        <ArrowRight size={13} className="text-text-tertiary transition group-hover:translate-x-0.5 group-hover:text-indigo-400"/>
+        <Link href={`/dashboard/documents/${kindRoute(doc.document_type)}/${doc.id}`} className="inline-flex items-center gap-2 text-[10px] text-text-secondary hover:text-indigo-300">
+          {state === 'blocked' ? `Review ${doc.claim_report.unsupported_claims} flagged claim${doc.claim_report.unsupported_claims === 1 ? '' : 's'}` : state === 'ready' ? 'Claims passed · ready for your approval' : 'Open document workspace'}
+          <ArrowRight size={13}/>
+        </Link>
+        <button type="button" disabled={deleting} onClick={onDelete} className="inline-flex items-center gap-1.5 rounded-[8px] px-2 py-1 text-[10px] text-red-400 transition hover:bg-red-500/10 disabled:opacity-50" aria-label={`Delete ${doc.title} version ${doc.version}`}>
+          <Trash2 size={12}/>{deleting ? 'Deleting…' : 'Delete'}
+        </button>
       </div>
-    </Link>
+    </article>
   );
 }
 
 export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter' }) {
   const { push } = useToast();
   const client = useQueryClient();
+  const studio = useStudioOverview();
 
   const jobs = useQuery({
     queryKey: ['jobs', 'generator'],
@@ -246,6 +276,7 @@ export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter
 
   const [jobId, setJobId] = useState('');
   const [template, setTemplate] = useState('ats');
+  const [sourceFileId, setSourceFileId] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
 
   const generate = useMutation({
@@ -253,6 +284,7 @@ export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter
       job_id: jobId,
       document_type: type,
       template,
+      source_file_id: isResume && sourceFileId ? sourceFileId : undefined,
     }),
     onSuccess: result => {
       setTaskId(result.task_id);
@@ -282,6 +314,13 @@ export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter
   );
 
   const isResume = type === 'resume';
+  const selectedResume = studio.data?.resumes.find(resume => resume.id === sourceFileId);
+  const uploadedResumeFacts = useQuery({
+    queryKey: ['resume-studio', 'facts', sourceFileId],
+    queryFn: () => import('@/lib/resume-studio').then(({ studioApi }) => studioApi.facts(sourceFileId)),
+    enabled: isResume && !!sourceFileId,
+  });
+  const resumeNeedsReview = !!uploadedResumeFacts.data?.some(fact => fact.status === 'pending');
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -358,6 +397,18 @@ export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter
                 </Select>
               </Field>
 
+              {isResume && (
+                <Field label="Use an uploaded resume" description="Select your resume so the new version can include its reviewed details. Confirm extracted facts first.">
+                  <Select className="h-12" value={sourceFileId} onChange={e => setSourceFileId(e.target.value)}>
+                    <option value="">Choose an uploaded resume</option>
+                    {studio.data?.resumes.map(resume => <option key={resume.id} value={resume.id} disabled={resume.status !== 'completed'}>{resume.filename} · v{resume.version} · {resume.status}</option>)}
+                  </Select>
+                  {sourceFileId && <div className={`mt-2 rounded-[12px] border p-3 text-[11px] leading-5 ${!selectedResume || selectedResume.status !== 'completed' || resumeNeedsReview ? 'border-amber-500/20 bg-amber-500/[0.06] text-amber-200' : 'border-emerald-500/15 bg-emerald-500/[0.05] text-text-secondary'}`}>
+                    {!selectedResume || selectedResume.status !== 'completed' ? 'Resume analysis is still processing. Wait until it is completed.' : resumeNeedsReview ? 'Review and confirm or reject all extracted details in Resume Studio before generating.' : 'This upload has been reviewed. Its confirmed details will be combined with your profile for the new resume.'}
+                  </div>}
+                </Field>
+              )}
+
               {selectedJob && (
                 <div className="rounded-[14px] border border-cyan-500/15 bg-cyan-500/[0.05] p-4">
                   <div className="font-mono text-[9px] uppercase tracking-[0.06em] text-cyan-400">Selected role</div>
@@ -409,7 +460,7 @@ export function DocumentGeneratorPage({ type }: { type: 'resume' | 'cover_letter
                   Grounding and claim verification run automatically.
                 </p>
 
-                <Button disabled={!jobId || generate.isPending || !!taskId}>
+                <Button disabled={!jobId || generate.isPending || !!taskId || (isResume && (!sourceFileId || selectedResume?.status !== 'completed' || resumeNeedsReview || uploadedResumeFacts.isLoading))}>
                   {generate.isPending ? 'Queuing…' : (
                     <><WandSparkles size={14}/>Generate {isResume ? 'resume' : 'cover letter'}</>
                   )}
@@ -499,6 +550,9 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
 
   const [content, setContent] = useState('');
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [regenerating, setRegenerating] = useState(false);
+  const [manualApprovalOpen, setManualApprovalOpen] = useState(false);
+  const [manualApprovalConfirmed, setManualApprovalConfirmed] = useState(false);
 
   useEffect(() => {
     if (q.data) setContent(q.data.content);
@@ -518,11 +572,16 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
   });
 
   const approve = useMutation({
-    mutationFn: () => api.post<GeneratedDocument>(`/documents/${documentId}/approve`, {}),
+    mutationFn: (manualOverride: boolean) => api.post<GeneratedDocument>(`/documents/${documentId}/approve`, {
+      manual_override: manualOverride,
+      acknowledged_unsupported_claims: manualOverride && manualApprovalConfirmed,
+    }),
     onSuccess: doc => {
       client.setQueryData(['document', documentId], doc);
       client.invalidateQueries({ queryKey: ['documents'] });
-      push('Document approved');
+      setManualApprovalOpen(false);
+      setManualApprovalConfirmed(false);
+      push(doc.claim_report.manual_approval ? 'Document manually approved' : 'Document approved');
     },
   });
 
@@ -532,6 +591,32 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
       push(`${format.toUpperCase()} download started`);
     } catch (e) {
       push(err(e), 'error');
+    }
+  }
+
+  async function regenerate() {
+    setRegenerating(true);
+    try {
+      const started = await api.post<{ task_id: string }>(`/documents/${documentId}/regenerate`, {});
+      push('Generating a new draft from this resume…');
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+        const task = await api.get<AsyncTask>(`/tasks/${started.task_id}`);
+        if (task.status === 'failed') throw new Error(task.error_code || 'Resume regeneration failed');
+        if (task.status === 'succeeded') {
+          const newId = task.result?.document_id;
+          if (typeof newId !== 'string') throw new Error('The new resume draft was not returned');
+          await client.invalidateQueries({ queryKey: ['documents'] });
+          push('New resume draft created');
+          window.location.href = `/dashboard/documents/${kindRoute(doc.document_type)}/${newId}`;
+          return;
+        }
+      }
+      throw new Error('Resume regeneration is taking longer than expected. Check the document library shortly.');
+    } catch (e) {
+      push(err(e), 'error');
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -562,6 +647,9 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
         description={doc.job ? `${doc.job.company} · ${doc.job.title}` : 'Generated document'}
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" disabled={regenerating || !doc.job_id} title={!doc.job_id ? 'Choose a job target in Resume Studio to regenerate this document' : undefined} onClick={regenerate}>
+              <RefreshCw size={14} className={regenerating ? 'animate-spin' : undefined}/>{regenerating ? 'Regenerating…' : `Regenerate ${doc.document_type === 'resume' ? 'resume' : 'cover letter'}`}
+            </Button>
             {doc.approved_at && (
               <>
                 <Button variant="secondary" onClick={() => download('pdf')}><Download size={14}/>PDF</Button>
@@ -570,18 +658,44 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
             )}
 
             <Button
-              disabled={blocked || !!doc.approved_at || approve.isPending}
-              onClick={() => approve.mutate()}
+              disabled={!!doc.approved_at || approve.isPending || changed}
+              title={changed ? 'Save your changes as a new version before approval' : undefined}
+              onClick={() => blocked ? setManualApprovalOpen(true) : approve.mutate(false)}
             >
               {doc.approved_at ? (
                 <><CheckCircle2 size={14}/>Approved</>
               ) : approve.isPending ? 'Approving…' : (
-                <><ShieldCheck size={14}/>Approve version</>
+                <><ShieldCheck size={14}/>{blocked ? 'Review & manually approve' : 'Approve version'}</>
               )}
             </Button>
           </div>
         }
       />
+
+      {manualApprovalOpen && !doc.approved_at && (
+        <Panel className="mb-5 border-amber-500/25 bg-amber-500/[0.06] p-5">
+          <div className="flex items-start gap-3">
+            <ShieldAlert size={19} className="mt-0.5 shrink-0 text-amber-400"/>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-14 font-semibold">Manual approval required</h2>
+              <p className="mt-2 text-12 leading-5 text-text-secondary">
+                Automated verification flagged {doc.claim_report.unsupported_claims} claim(s). Manual approval does not mean these claims passed verification. Review the document and every flagged claim before continuing.
+              </p>
+              <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-[10px] border border-border bg-surface-1/70 p-3 text-11 leading-5">
+                <input type="checkbox" className="mt-1" checked={manualApprovalConfirmed} onChange={e => setManualApprovalConfirmed(e.target.checked)}/>
+                <span>I reviewed every flagged claim, confirm the document is accurate, and accept responsibility for approving this version.</span>
+              </label>
+              {approve.error && <div className="mt-3"><FieldError>{err(approve.error)}</FieldError></div>}
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button variant="secondary" disabled={approve.isPending} onClick={() => { setManualApprovalOpen(false); setManualApprovalConfirmed(false); }}>Cancel</Button>
+                <Button disabled={!manualApprovalConfirmed || approve.isPending} onClick={() => approve.mutate(true)}>
+                  <ShieldAlert size={14}/>{approve.isPending ? 'Approving…' : 'Manually approve version'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
 
       <section className="career-editor-status mb-5 overflow-hidden rounded-[18px] border border-border">
         <div className="grid gap-px bg-border sm:grid-cols-4">
@@ -600,12 +714,24 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
           />
           <Status
             label="Approval"
-            value={doc.approved_at ? 'Approved' : 'Pending'}
+            value={doc.approved_at ? (doc.claim_report.manual_approval ? 'Manual' : 'Approved') : 'Pending'}
             icon={doc.approved_at ? CheckCircle2 : Clock3}
             tone={doc.approved_at ? 'positive' : 'neutral'}
           />
         </div>
       </section>
+
+      {(doc.generator === 'deterministic-grounded' || doc.generator === 'deterministic-ai-fallback') && (
+        <div className="mb-5 rounded-[14px] border border-amber-500/20 bg-amber-500/[0.06] p-4 text-12 leading-5 text-text-secondary">
+          This version used the built-in grounded formatter because the AI provider was unavailable or returned incomplete content. It includes verified profile sections; configure a working AI provider and generate a new version for AI-tailored writing.
+        </div>
+      )}
+
+      {doc.claim_report.manual_approval && (
+        <div className="mb-5 rounded-[14px] border border-amber-500/20 bg-amber-500/[0.06] p-4 text-12 leading-5 text-text-secondary">
+          <strong className="text-amber-300">Manually approved:</strong> automated claim-verification warnings remain on this version. The approval records that you reviewed and accepted those claims.
+        </div>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_380px]">
         <Panel className="career-document-editor overflow-hidden">
@@ -649,7 +775,7 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
                 </div>
               </>
             ) : (
-              <Paper content={content}/>
+              <Paper content={content} template={doc.template_key} isResume={doc.document_type === 'resume'}/>
             )}
           </div>
         </Panel>
@@ -724,7 +850,7 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
                 <h2 className="text-13 font-semibold">Quick preview</h2>
               </div>
               <div className="max-h-[410px] overflow-y-auto p-4">
-                <Paper content={content} compact/>
+                <Paper content={content} compact template={doc.template_key} isResume={doc.document_type === 'resume'}/>
               </div>
             </Panel>
           )}
@@ -734,18 +860,8 @@ export function DocumentEditorPage({ documentId }: { documentId: string }) {
   );
 }
 
-function Paper({ content, compact = false }: { content: string; compact?: boolean }) {
-  return (
-    <div
-      className={`career-paper-preview mx-auto bg-white text-slate-900 shadow-[0_18px_50px_rgba(0,0,0,.18)] ${
-        compact
-          ? 'min-h-[360px] p-5 text-[10px] leading-5'
-          : 'min-h-[720px] max-w-[760px] p-8 text-[12px] leading-6 sm:p-10'
-      }`}
-    >
-      <div className="whitespace-pre-wrap">{content}</div>
-    </div>
-  );
+function Paper({ content, compact = false, template = 'ats', isResume = true }: { content: string; compact?: boolean; template?: string; isResume?: boolean }) {
+  return <ResumePaper content={content} compact={compact} template={template} isResume={isResume}/>;
 }
 
 function FeatureMetric({

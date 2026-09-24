@@ -12,6 +12,10 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN mkdir -p public && npm run build
 
+FROM deps AS test
+COPY . .
+CMD ["npm", "test", "--", "--reporter=dot"]
+
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production

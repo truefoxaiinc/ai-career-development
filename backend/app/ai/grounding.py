@@ -47,13 +47,18 @@ def _entry_text(entry: ProfileEntry) -> str:
     ])
 
 
-def claim_supported(claim: str, candidate: Candidate, entries: Iterable[ProfileEntry]) -> tuple[bool, str | None, float]:
+def claim_supported(claim: str, candidate: Candidate, entries: Iterable[ProfileEntry], extra_facts: str = "") -> tuple[bool, str | None, float]:
     claim_tokens = _tokens(claim)
     claim_numbers = _numbers(claim)
     if len(claim_tokens) <= 2 and not claim_numbers:
         return True, None, 1.0
 
-    candidate_text = " ".join([candidate.name, candidate.headline, candidate.location, candidate.profile_summary])
+    candidate_text = " ".join([
+        candidate.name, candidate.headline, candidate.location,
+        candidate.phone or "", candidate.profile_summary,
+        " ".join(str(value) for value in (candidate.links or {}).values()),
+        extra_facts,
+    ])
     verified_entries = [entry for entry in entries if entry.verified]
     sources: list[tuple[str, str]] = [("candidate", candidate_text)]
     sources.extend((str(entry.id), _entry_text(entry)) for entry in verified_entries)
@@ -90,12 +95,12 @@ def extract_claims(content: str) -> list[str]:
     return candidates
 
 
-def verify_document_claims(content: str, candidate: Candidate, entries: Iterable[ProfileEntry]) -> dict:
+def verify_document_claims(content: str, candidate: Candidate, entries: Iterable[ProfileEntry], extra_facts: str = "") -> dict:
     claims = extract_claims(content)
     results = []
     unsupported = 0
     for claim in claims:
-        supported, source_id, confidence = claim_supported(claim, candidate, entries)
+        supported, source_id, confidence = claim_supported(claim, candidate, entries, extra_facts)
         if not supported:
             unsupported += 1
         results.append({"claim": claim, "supported": supported, "source_entry_id": source_id, "confidence": confidence})

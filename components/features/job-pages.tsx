@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import {
-  FormEvent,
   ReactNode,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -29,10 +29,8 @@ import {
   Filter,
   Globe2,
   MapPin,
-  Plus,
   Search,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   Target,
   TrendingUp,
@@ -57,7 +55,6 @@ import {
   Panel,
   Select,
   Skeleton,
-  Textarea,
 } from '@/components/ui';
 
 import {
@@ -115,14 +112,6 @@ const cleanText = (value?: string | null) =>
 type TriState = '' | 'true' | 'false';
 
 
-const triStateBoolean = (
-  value: TriState,
-): boolean | null =>
-  value === ''
-    ? null
-    : value === 'true';
-
-
 const formatAvailability = (
   value?: boolean | null,
 ) =>
@@ -162,7 +151,7 @@ const formatSalary = (
   ) {
     return `${prefix}${formatNumber(
       job.salary_min,
-    )} – ${formatNumber(
+    )} â€“ ${formatNumber(
       job.salary_max,
     )}`;
   }
@@ -600,39 +589,6 @@ export function RecommendationsPage() {
   const q =
     useRecommendations();
 
-  const discover =
-    useDiscoverJobs();
-
-  const client =
-    useQueryClient();
-
-  const { push } =
-    useToast();
-
-  async function refreshOpportunities() {
-    try {
-      const task =
-        await discover.mutateAsync();
-
-      await client.invalidateQueries({
-        queryKey: ['jobs'],
-      });
-
-      const found =
-        Number(
-          task.result?.found ?? 0,
-        ) || 0;
-
-      push(
-        found
-          ? `Discovered ${found} matching jobs`
-          : 'Discovery finished with no new matching jobs',
-      );
-    } catch (error) {
-      push(err(error));
-    }
-  }
-
   const strongCount =
     q.data?.filter(
       (job) =>
@@ -646,29 +602,7 @@ export function RecommendationsPage() {
       <PageHeader
         eyebrow="Job discovery"
         title="Opportunities picked for you"
-        description="CareerPilot ranks roles using your verified experience, education, skills, and preferences — not just keywords."
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={refreshOpportunities}
-              disabled={discover.isPending}
-            >
-              <Sparkles size={14} />
-              {discover.isPending
-                ? 'Finding jobs...'
-                : 'Find new jobs'}
-            </Button>
-
-            <Link href="/dashboard/preferences">
-              <Button variant="secondary">
-                <SlidersHorizontal
-                  size={14}
-                />
-                Tune preferences
-              </Button>
-            </Link>
-          </div>
-        }
+        description="Browse the full imported job feed under Search opportunities. These recommendations rank those jobs against your verified experience, education, skills, and preferences."
       />
 
       <JobsWorkspaceNav active="recommendations" />
@@ -701,7 +635,7 @@ export function RecommendationsPage() {
                   ? String(
                       q.data.length,
                     )
-                  : '—'
+                  : 'â€”'
               }
               label="recommended"
             />
@@ -712,7 +646,7 @@ export function RecommendationsPage() {
                   ? String(
                       strongCount,
                     )
-                  : '—'
+                  : 'â€”'
               }
               label="strong fits"
               accent
@@ -841,9 +775,6 @@ export function JobSearchPage() {
   const [page, setPage] =
     useState(1);
 
-  const [manual, setManual] =
-    useState(false);
-
   const deferredQuery =
     useDebouncedValue(
       query,
@@ -921,114 +852,24 @@ export function JobSearchPage() {
   const { push } =
     useToast();
 
-  type ManualJobDraft = {
-    title: string;
-    company: string;
-    location: string;
-    country: string;
-    city: string;
-    category: string;
-    occupation: string;
-    remote_mode: string;
-    salary_min: string;
-    salary_max: string;
-    salary_currency: string;
-    employment_type: string;
-    visa_sponsorship: TriState;
-    relocation_support: TriState;
-    work_authorization: string;
-    description: string;
-    apply_url: string;
-  };
+  const discover = useDiscoverJobs();
 
-  const emptyManualJob =
-    (): ManualJobDraft => ({
-      title: '',
-      company: '',
-      location: '',
-      country: '',
-      city: '',
-      category: '',
-      occupation: '',
-      remote_mode: '',
-      salary_min: '',
-      salary_max: '',
-      salary_currency: '',
-      employment_type: '',
-      visa_sponsorship: '',
-      relocation_support: '',
-      work_authorization: '',
-      description: '',
-      apply_url: '',
-    });
+  const autoSyncStarted = useRef(false);
 
-  const [
-    manualData,
-    setManualData,
-  ] = useState<ManualJobDraft>(
-    emptyManualJob,
-  );
+  useEffect(() => {
+    if (autoSyncStarted.current) return;
+    autoSyncStarted.current = true;
 
-  const add = useMutation({
-    mutationFn: () =>
-      api.post<GlobalJob>(
-        '/jobs/manual',
-        {
-          ...manualData,
-          remote_mode:
-            manualData.remote_mode ||
-            null,
-          salary_min:
-            manualData.salary_min
-              ? Number(
-                  manualData.salary_min,
-                )
-              : null,
-          salary_max:
-            manualData.salary_max
-              ? Number(
-                  manualData.salary_max,
-                )
-              : null,
-          salary_currency:
-            manualData.salary_currency
-              .trim()
-              .toUpperCase() ||
-            null,
-          employment_type:
-            manualData.employment_type
-              .trim() ||
-            null,
-          visa_sponsorship:
-            triStateBoolean(
-              manualData.visa_sponsorship,
-            ),
-          relocation_support:
-            triStateBoolean(
-              manualData.relocation_support,
-            ),
-          work_authorization:
-            manualData.work_authorization
-              .trim() ||
-            null,
-        },
-      ),
-
-    onSuccess: async () => {
-      push(
-        'Job description added',
-      );
-
-      setManual(false);
-      setManualData(
-        emptyManualJob(),
-      );
-
-      await client.invalidateQueries({
-        queryKey: ['jobs'],
+    discover.mutateAsync()
+      .then(async (task) => {
+        await client.invalidateQueries({ queryKey: ['jobs'] });
+        const found = Number(task.result?.found ?? 0) || 0;
+        push(found ? `Job listings synced. ${found} refreshed from providers.` : 'Job listing sync finished.');
+      })
+      .catch((error: unknown) => {
+        push(`Automatic job sync failed: ${err(error)}`);
       });
-    },
-  });
+  }, [client, discover.mutateAsync, push]);
 
   const hasFilters =
     Boolean(
@@ -1046,13 +887,6 @@ export function JobSearchPage() {
         source ||
         sort !== 'recent',
     );
-
-  function submitManual(
-    e: FormEvent,
-  ) {
-    e.preventDefault();
-    add.mutate();
-  }
 
   function resetFilters() {
     setQuery('');
@@ -1076,463 +910,16 @@ export function JobSearchPage() {
       <PageHeader
         eyebrow="Job discovery"
         title="Search opportunities"
-        description="Search normalized jobs across local and international sources, or add a vacancy privately for analysis."
-        actions={
-          <Button
-            onClick={() =>
-              setManual(
-                (value) =>
-                  !value,
-              )
-            }
-            variant={
-              manual
-                ? 'primary'
-                : 'secondary'
-            }
-          >
-            {manual ? (
-              <X size={14} />
-            ) : (
-              <Plus size={14} />
-            )}
-
-            {manual
-              ? 'Close'
-              : 'Add private job'}
-          </Button>
-        }
+        description="Search and filter listings synced from your configured job platforms."
       />
 
+      <p className="mb-4 text-13 text-text-secondary" role="status">
+        {discover.isPending
+          ? 'Automatically syncing broad job listings from connected platformsâ€¦'
+          : 'Listings sync automatically when you open this page. Browse all imported jobs here; personalized matches are shown separately in Recommendations.'}
+      </p>
+
       <JobsWorkspaceNav active="search" />
-
-      {manual && (
-        <Panel className="career-manual-job mb-5 overflow-hidden border-indigo-500/20">
-          <div className="flex items-start justify-between border-b border-border px-5 py-5 md:px-6">
-            <div className="flex items-start gap-3">
-              <div className="flex size-10 items-center justify-center rounded-[11px] border border-indigo-500/15 bg-indigo-500/10 text-indigo-400">
-                <Plus size={17} />
-              </div>
-
-              <div>
-                <h2 className="text-15 font-semibold">
-                  Add a private vacancy
-                </h2>
-
-                <p className="mt-1 max-w-xl text-11 leading-5 text-text-secondary">
-                  Paste a role you found
-                  outside your configured job
-                  sources. Add only details
-                  stated by the vacancy; unknown
-                  visa or relocation information
-                  can stay unspecified.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <form
-            onSubmit={
-              submitManual
-            }
-            className="grid gap-5 p-5 md:grid-cols-2 md:p-6"
-          >
-            <SearchField label="Job title">
-              <Input
-                required
-                value={
-                  manualData.title
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      title:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Registered Nurse"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Company">
-              <Input
-                required
-                value={
-                  manualData.company
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      company:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Company name"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Location">
-              <Input
-                value={
-                  manualData.location
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      location:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Toronto, Canada · Hybrid"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Country">
-              <Input
-                value={
-                  manualData.country
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      country:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Canada"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="City">
-              <Input
-                value={
-                  manualData.city
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      city:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Toronto"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Job category">
-              <Input
-                value={
-                  manualData.category
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      category:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Healthcare"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Occupation">
-              <Input
-                value={
-                  manualData.occupation
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      occupation:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Registered Nurse"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Work mode">
-              <Select
-                value={
-                  manualData.remote_mode
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      remote_mode:
-                        e.target.value,
-                    }),
-                  )
-                }
-                className="h-11"
-              >
-                <option value="">
-                  Not specified
-                </option>
-                <option value="remote">
-                  Remote
-                </option>
-                <option value="hybrid">
-                  Hybrid
-                </option>
-                <option value="onsite">
-                  On-site
-                </option>
-              </Select>
-            </SearchField>
-
-            <SearchField label="Employment type">
-              <Input
-                value={
-                  manualData.employment_type
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      employment_type:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Full-time"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Currency">
-              <Input
-                maxLength={8}
-                value={
-                  manualData.salary_currency
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      salary_currency:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="CAD"
-                className="h-11 uppercase"
-              />
-            </SearchField>
-
-            <SearchField label="Minimum salary">
-              <Input
-                type="number"
-                min="0"
-                value={
-                  manualData.salary_min
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      salary_min:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="80000"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Maximum salary">
-              <Input
-                type="number"
-                min="0"
-                value={
-                  manualData.salary_max
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      salary_max:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="100000"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Visa sponsorship">
-              <Select
-                value={
-                  manualData.visa_sponsorship
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      visa_sponsorship:
-                        e.target
-                          .value as TriState,
-                    }),
-                  )
-                }
-                className="h-11"
-              >
-                <option value="">
-                  Unknown / not stated
-                </option>
-                <option value="true">
-                  Available
-                </option>
-                <option value="false">
-                  Not available
-                </option>
-              </Select>
-            </SearchField>
-
-            <SearchField label="Relocation support">
-              <Select
-                value={
-                  manualData.relocation_support
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      relocation_support:
-                        e.target
-                          .value as TriState,
-                    }),
-                  )
-                }
-                className="h-11"
-              >
-                <option value="">
-                  Unknown / not stated
-                </option>
-                <option value="true">
-                  Available
-                </option>
-                <option value="false">
-                  Not available
-                </option>
-              </Select>
-            </SearchField>
-
-            <SearchField label="Work authorization">
-              <Input
-                value={
-                  manualData.work_authorization
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      work_authorization:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="Must be authorized to work in Canada"
-                className="h-11"
-              />
-            </SearchField>
-
-            <SearchField label="Official application URL">
-              <Input
-                type="url"
-                required
-                value={
-                  manualData.apply_url
-                }
-                onChange={(e) =>
-                  setManualData(
-                    (current) => ({
-                      ...current,
-                      apply_url:
-                        e.target.value,
-                    }),
-                  )
-                }
-                placeholder="https://..."
-                className="h-11"
-              />
-            </SearchField>
-
-            <div className="md:col-span-2">
-              <SearchField label="Job description">
-                <Textarea
-                  required
-                  value={
-                    manualData.description
-                  }
-                  onChange={(e) =>
-                    setManualData(
-                      (current) => ({
-                        ...current,
-                        description:
-                          e.target
-                            .value,
-                      }),
-                    )
-                  }
-                  placeholder="Paste the complete job description..."
-                  className="min-h-[190px]"
-                />
-              </SearchField>
-            </div>
-
-            {add.error && (
-              <div className="md:col-span-2">
-                <FieldError>
-                  {err(add.error)}
-                </FieldError>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between border-t border-border pt-5 md:col-span-2">
-              <p className="hidden text-10 text-text-secondary sm:block">
-                External job text is treated
-                as untrusted input during AI
-                analysis.
-              </p>
-
-              <Button
-                disabled={
-                  add.isPending
-                }
-              >
-                {add.isPending
-                  ? 'Adding…'
-                  : 'Add private job'}
-              </Button>
-            </div>
-          </form>
-        </Panel>
-      )}
 
       <section className="career-search-hero mb-5 rounded-[22px] border border-border p-4 md:p-5">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1690,7 +1077,7 @@ export function JobSearchPage() {
               </option>
 
               <option value="title">
-                Title A–Z
+                Title Aâ€“Z
               </option>
             </Select>
           </SearchField>
@@ -1795,7 +1182,7 @@ export function JobSearchPage() {
         </div>
 
         <div className="mt-4 rounded-[12px] border border-border bg-surface-2/45 px-4 py-3 text-[10px] leading-5 text-text-secondary">
-          Visa sponsorship, relocation support, and work-authorization filters only match jobs where the provider supplied that information. Unknown provider data is not treated as “No”.
+          Visa sponsorship, relocation support, and work-authorization filters only match jobs where the provider supplied that information. Unknown provider data is not treated as â€œNoâ€.
         </div>
 
         {hasFilters && (
@@ -1867,7 +1254,7 @@ export function JobSearchPage() {
 
             {salaryMin && (
               <FilterChip
-                label={`Salary ≥ ${currency ? `${currency.toUpperCase()} ` : ''}${salaryMin}`}
+                label={`Salary â‰¥ ${currency ? `${currency.toUpperCase()} ` : ''}${salaryMin}`}
                 onRemove={() => {
                   setSalaryMin('');
                   setPage(1);
@@ -1937,7 +1324,7 @@ export function JobSearchPage() {
 
             {sort !== 'recent' && (
               <FilterChip
-                label="Title A–Z"
+                label="Title Aâ€“Z"
                 onRemove={() => {
                   setSort('recent');
                   setPage(1);
@@ -1971,7 +1358,7 @@ export function JobSearchPage() {
           .length ? (
         <EmptyState
           title="No imported jobs match these filters"
-          description="Search filters jobs already collected into CareerPilot. Use For you → Find new jobs to import fresh opportunities, then broaden country, location, or sponsorship filters if needed."
+          description="Search filters jobs already collected into CareerPilot. Use For you â†’ Find new jobs to import fresh opportunities, then broaden country, location, or sponsorship filters if needed."
         />
       ) : (
         <>
@@ -2006,7 +1393,7 @@ export function JobSearchPage() {
             <span className="pl-2 font-mono text-[10px] text-text-secondary">
               Page{' '}
               {jobs.data.page} of{' '}
-              {jobs.data.pages} ·{' '}
+              {jobs.data.pages} Â·{' '}
               {jobs.data.total}{' '}
               jobs
             </span>
@@ -2643,7 +2030,7 @@ export function JobMatchPage({
 
       <PageHeader
         eyebrow="Explainable matching"
-        title={`${match.role} · ${match.company}`}
+        title={`${match.role} Â· ${match.company}`}
         description="See exactly where your verified profile aligns, where evidence is transferable, and what the role still asks for."
         actions={
           <Link
@@ -3175,7 +2562,7 @@ function MatchFactor({
 
         <span className="font-mono text-[10px] text-text-secondary">
           {Math.round(score)}%
-          {' · '}
+          {' Â· '}
           {Math.round(weight)}%
           {' weight'}
         </span>

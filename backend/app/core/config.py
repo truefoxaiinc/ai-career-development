@@ -320,6 +320,11 @@ class Settings(BaseSettings):
                 "strong secret in production"
             )
 
+        if not self.cookie_secure:
+            raise RuntimeError(
+                "COOKIE_SECURE must be true in production"
+            )
+
         if (
             self.auth_mode == "oidc"
             and not all(

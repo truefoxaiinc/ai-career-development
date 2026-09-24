@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,8 +7,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
-COPY . .
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 RUN mkdir -p /app/.careerpilot-storage
+
+FROM base AS test
+COPY tests ./tests
+CMD ["python", "-m", "pytest", "-q"]
+
+FROM base AS api
 
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

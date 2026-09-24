@@ -15,3 +15,8 @@ class GenerateDocumentRequest(BaseModel):
 class DocumentEditRequest(BaseModel):
     content: str = Field(min_length=20, max_length=100_000)
     title: str | None = Field(default=None, max_length=300)
+
+
+class DocumentApprovalRequest(BaseModel):
+    manual_override: bool = False
+    acknowledged_unsupported_claims: bool = False

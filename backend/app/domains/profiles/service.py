@@ -404,6 +404,9 @@ def validate_resume_upload(
     data: bytes,
     settings: Settings,
 ) -> tuple[str, str]:
+    if not data:
+        raise HTTPException(status_code=415, detail="Resume file is empty")
+
     if len(data) > settings.upload_max_bytes:
         raise HTTPException(
             status_code=413,

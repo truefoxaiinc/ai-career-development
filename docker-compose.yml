@@ -1,4 +1,10 @@
 services:
+  frontend-tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+
   frontend:
     build:
       context: .
@@ -27,6 +33,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  backend-tests:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: test
 
   postgres:
     image: pgvector/pgvector:pg17
