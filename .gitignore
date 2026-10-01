@@ -13,6 +13,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.*.example
 fresh-resume.pdf
 fresh-resume.docx
 tailored-resume.pdf
