@@ -7,4 +7,4 @@ htmlcov
 .storage
 .careerpilot-storage
 *.db
-.env
+.env*

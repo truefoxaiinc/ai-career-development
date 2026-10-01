@@ -61,13 +61,17 @@ docker compose --env-file .env.docker down
 
 ## Production Docker deployment
 
-The production stack is separate from local development and requires real secrets, a public frontend/API URL, SMTP, and OpenAI configuration. It includes PostgreSQL with pgvector, Redis with persistence, MinIO S3-compatible object storage, the API, a database-backed worker, and the Next.js frontend. Put the production file in a secret-managed deployment environment; do not commit it.
+The production stack is separate from local development and requires real secrets, public frontend/API URLs, SMTP, AI-provider configuration, and an externally managed S3-compatible bucket. It includes PostgreSQL with pgvector, authenticated Redis with persistence, the API, a database-backed worker, and the Next.js frontend. Put the production environment file in a secret-managed deployment environment; do not commit it.
 
 ```bash
 copy .env.production.example .env.production
 # Edit .env.production with production URLs, secrets, SMTP, and OpenAI settings.
 docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
 ```
+
+The frontend and API bind to loopback only. Terminate TLS with a host reverse proxy or load balancer and forward traffic to `127.0.0.1:3000` and `127.0.0.1:8000`. The database and Redis are isolated on an internal Docker network and are not published to the host.
+
+Before the first deployment, create the S3 bucket, grant its application identity access only to that bucket, enable bucket encryption/versioning, and configure lifecycle retention. Back up PostgreSQL and test restoration regularly; Docker volumes are persistent storage, not backups.
 
 Check the deployment:
 

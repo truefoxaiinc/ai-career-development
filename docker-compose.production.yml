@@ -1,135 +1,156 @@
-﻿services:
+x-app-defaults: &app-defaults
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: production
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
+  VALKEY_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/0
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?Set S3_ENDPOINT_URL}
+  S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
+  S3_REGION: ${S3_REGION:?Set S3_REGION}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+  S3_SERVER_SIDE_ENCRYPTION: ${S3_SERVER_SIDE_ENCRYPTION:-AES256}
+  LITELLM_BASE_URL: ${LITELLM_BASE_URL:?Set LITELLM_BASE_URL}
+  LITELLM_API_KEY: ${LITELLM_API_KEY:?Set LITELLM_API_KEY}
+  LITELLM_MODEL: ${LITELLM_MODEL:?Set LITELLM_MODEL}
+  TASK_MODE: database
+  ENABLE_DEV_JOB_PROVIDER: "false"
+
+services:
   frontend:
+    <<: *app-defaults
     build:
       context: .
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL}
-    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=128m,uid=1001,gid=1001
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
+    networks:
+      - edge
 
   api:
+    <<: *app-defaults
     build:
       context: ./backend
+      target: api
     env_file:
       - path: .env.production
         required: false
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
-      VALKEY_URL: redis://redis:6379/0
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
-      S3_REGION: us-east-1
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      LITELLM_BASE_URL: ${LITELLM_BASE_URL:?Set LITELLM_BASE_URL}
-      LITELLM_API_KEY: ${LITELLM_API_KEY:?Set LITELLM_API_KEY}
-      LITELLM_MODEL: ${LITELLM_MODEL:?Set LITELLM_MODEL}
-      TASK_MODE: database
+      <<: *backend-environment
       CORS_ORIGINS: '["${FRONTEND_URL:?Set FRONTEND_URL}"]'
-    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     ports:
-      - "${API_PORT:-8000}:8000"
-    volumes:
-      - backend-storage:/app/.careerpilot-storage
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
-      minio-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+        condition: service_healthy
+    networks:
+      - edge
+      - data
 
   worker:
+    <<: *app-defaults
     build:
       context: ./backend
+      target: api
     env_file:
       - path: .env.production
         required: false
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB}
-      VALKEY_URL: redis://redis:6379/0
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
-      S3_REGION: us-east-1
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      LITELLM_BASE_URL: ${LITELLM_BASE_URL:?Set LITELLM_BASE_URL}
-      LITELLM_API_KEY: ${LITELLM_API_KEY:?Set LITELLM_API_KEY}
-      LITELLM_MODEL: ${LITELLM_MODEL:?Set LITELLM_MODEL}
-      TASK_MODE: database
+      <<: *backend-environment
     command: ["python", "-m", "app.worker"]
-    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
-      minio-init:
-        condition: service_completed_successfully
+        condition: service_healthy
+    networks:
+      - data
+      - outbound
 
   postgres:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-    restart: unless-stopped
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    shm_size: 256mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
+    stop_grace_period: 1m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - data
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis-data:/data
-
-  minio:
-    image: quay.io/minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-    restart: unless-stopped
-    volumes:
-      - object-storage:/data
-
-  minio-init:
-    image: quay.io/minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_started
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
-      S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      "until mc alias set local http://minio:9000 \"$${MINIO_ROOT_USER}\" \"$${MINIO_ROOT_PASSWORD}\"; do sleep 2; done;
-      mc mb --ignore-existing local/$${S3_BUCKET}"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - data
 
 volumes:
-  backend-storage:
   postgres-data:
   redis-data:
-  object-storage:
+
+networks:
+  edge:
+  outbound:
+  data:
+    internal: true
