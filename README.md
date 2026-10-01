@@ -61,7 +61,7 @@ docker compose --env-file .env.docker down
 
 ## Production Docker deployment
 
-The production stack is separate from local development and requires real secrets, public frontend/API URLs, SMTP, AI-provider configuration, and an externally managed S3-compatible bucket. It includes PostgreSQL with pgvector, authenticated Redis with persistence, the API, a database-backed worker, and the Next.js frontend. Put the production environment file in a secret-managed deployment environment; do not commit it.
+The production stack is separate from local development and requires real secrets, public frontend/API URLs, SMTP, AI-provider configuration, AWS RDS for PostgreSQL, and an externally managed S3-compatible bucket. It includes authenticated Redis with persistence, the API, a database-backed worker, and the Next.js frontend. Put the production environment file in a secret-managed deployment environment; do not commit it.
 
 ```bash
 copy .env.production.example .env.production
@@ -72,6 +72,19 @@ docker compose --env-file .env.production -f docker-compose.production.yml up -d
 The frontend and API bind to loopback only. Terminate TLS with a host reverse proxy or load balancer and forward traffic to `127.0.0.1:3000` and `127.0.0.1:8000`. The database and Redis are isolated on an internal Docker network and are not published to the host.
 
 Before the first deployment, create the S3 bucket, grant its application identity access only to that bucket, enable bucket encryption/versioning, and configure lifecycle retention. Back up PostgreSQL and test restoration regularly; Docker volumes are persistent storage, not backups.
+
+For RDS, use PostgreSQL with the `vector` extension available and set these values in `.env.production`:
+
+```dotenv
+RDS_HOST=INSTANCE.REGION.rds.amazonaws.com
+RDS_PORT=5432
+RDS_DB_NAME=careerpilot
+RDS_USERNAME=careerpilot
+RDS_PASSWORD=your-rotated-password
+RDS_SSLMODE=require
+```
+
+The application constructs the SQLAlchemy connection URL safely, so the password may contain special characters. Keep the RDS instance private where possible, allow port `5432` only from the application host or its security group, require TLS, and never put real credentials in an example file. The API runs Alembic migrations on startup, including `CREATE EXTENSION IF NOT EXISTS vector`, so the database user needs permission to install that RDS-supported extension during the first deployment.
 
 Check the deployment:
 

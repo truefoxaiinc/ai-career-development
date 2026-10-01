@@ -128,9 +128,12 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
           FRONTEND_URL: https://example.com
-          POSTGRES_DB: careerpilot
-          POSTGRES_USER: careerpilot
-          POSTGRES_PASSWORD: ci-only-placeholder
+          RDS_HOST: db.example.com
+          RDS_PORT: "5432"
+          RDS_DB_NAME: careerpilot
+          RDS_USERNAME: careerpilot
+          RDS_PASSWORD: ci-only-placeholder
+          RDS_SSLMODE: require
           REDIS_PASSWORD: ci-only-placeholder
           S3_BUCKET: careerpilot
           S3_ENDPOINT_URL: https://s3.example.com

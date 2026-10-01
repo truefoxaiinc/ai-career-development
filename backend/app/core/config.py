@@ -5,8 +5,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -26,6 +27,17 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
 
     database_url: str = "sqlite:///./careerpilot-dev.db"
+
+    rds_host: str | None = None
+    rds_port: int = 5432
+    rds_db_name: str | None = None
+    rds_username: str | None = None
+    rds_password: str | None = None
+    rds_sslmode: Literal[
+        "require",
+        "verify-ca",
+        "verify-full",
+    ] = "require"
 
     frontend_url: str = "http://localhost:3000"
 
@@ -172,6 +184,36 @@ class Settings(BaseSettings):
             ]
 
         return value
+
+    @model_validator(mode="after")
+    def configure_rds_database_url(self):
+        rds_values = (
+            self.rds_host,
+            self.rds_db_name,
+            self.rds_username,
+            self.rds_password,
+        )
+
+        if not any(rds_values):
+            return self
+
+        if not all(rds_values):
+            raise ValueError(
+                "RDS_HOST, RDS_DB_NAME, RDS_USERNAME, and "
+                "RDS_PASSWORD must all be set"
+            )
+
+        self.database_url = URL.create(
+            drivername="postgresql+psycopg",
+            username=self.rds_username,
+            password=self.rds_password,
+            host=self.rds_host,
+            port=self.rds_port,
+            database=self.rds_db_name,
+            query={"sslmode": self.rds_sslmode},
+        ).render_as_string(hide_password=False)
+
+        return self
 
     @field_validator(
         "s3_server_side_encryption",
