@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -26,7 +27,7 @@ class ObjectStorage(Protocol):
 
 
 class LocalObjectStorage:
-    """Development/test adapter. Never enabled in production."""
+    """Private filesystem adapter for one-host deployments."""
 
     def __init__(
         self,
@@ -36,7 +37,9 @@ class LocalObjectStorage:
         self.root.mkdir(
             parents=True,
             exist_ok=True,
+            mode=0o700,
         )
+        self.root.chmod(0o700)
 
     def _path(
         self,
@@ -64,8 +67,19 @@ class LocalObjectStorage:
         path.parent.mkdir(
             parents=True,
             exist_ok=True,
+            mode=0o700,
         )
-        path.write_bytes(data)
+        path.parent.chmod(0o700)
+
+        # Do not follow an existing symlink at the final path, and create
+        # private files regardless of the process umask.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as file_handle:
+            file_handle.write(data)
+        path.chmod(0o600)
 
         return key
 

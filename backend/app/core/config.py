@@ -88,6 +88,12 @@ class Settings(BaseSettings):
         "s3",
     ] = "local"
 
+    # Local storage is suitable for a single-host production deployment only
+    # when the operator explicitly accepts that availability and backups are
+    # their responsibility. S3-compatible storage remains the recommended
+    # production default.
+    allow_local_storage_in_production: bool = False
+
     local_storage_dir: Path = Path(
         "./.careerpilot-storage"
     )
@@ -399,9 +405,23 @@ class Settings(BaseSettings):
             )
 
         if self.storage_backend == "local":
+            if not self.allow_local_storage_in_production:
+                raise RuntimeError(
+                    "Production local storage requires "
+                    "ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true; "
+                    "S3-compatible object storage is recommended "
+                    "for scalable deployments"
+                )
+
+            if not self.local_storage_dir.is_absolute():
+                raise RuntimeError(
+                    "LOCAL_STORAGE_DIR must be an absolute path "
+                    "when local storage is enabled in production"
+                )
+
+        if self.storage_backend == "s3" and not self.s3_bucket:
             raise RuntimeError(
-                "Production must use "
-                "S3-compatible object storage"
+                "S3_BUCKET is required when STORAGE_BACKEND=s3"
             )
 
         if self.enable_dev_job_provider:

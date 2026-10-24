@@ -1116,6 +1116,7 @@ Return exactly one JSON object shaped like:
       "entry_type": "personal|skill|experience|education|certification|project",
       "label": "exact text supported by the resume",
       "source_text": "exact supporting text copied from the resume",
+    "structured_data": {"role": "...", "company": "...", "start_date": "...", "end_date": "...", "description": "..."},
       "confidence": 0.0
     }
   ]
@@ -1201,6 +1202,12 @@ def _sanitize_ai_resume_entries(
             structured_data = {
                 "raw": source_text,
             }
+            supplied_data = raw.get("structured_data")
+            if isinstance(supplied_data, dict):
+                for field in ("role", "company", "start_date", "end_date", "description"):
+                    value = supplied_data.get(field)
+                    if isinstance(value, str) and value.strip() and value.strip() in safe_resume:
+                        structured_data[field] = value.strip()
 
         item = {
             "entry_type": entry_type,
@@ -1232,10 +1239,12 @@ def _extract_entries_with_ai(
     text: str,
     prompt_injection_flags: list[str],
 ) -> tuple[list[dict], str, str | None]:
+    deterministic_entries = _extract_entries(text)
+
     # Never send suspicious prompt-like resumes to the model.
     if prompt_injection_flags:
         return (
-            _extract_entries(text),
+            deterministic_entries,
             "deterministic-prompt-injection-fallback",
             "prompt_injection_detected",
         )
@@ -1244,7 +1253,7 @@ def _extract_entries_with_ai(
 
     if not gateway.configured:
         return (
-            _extract_entries(text),
+            deterministic_entries,
             "deterministic",
             None,
         )
@@ -1266,7 +1275,7 @@ def _extract_entries_with_ai(
         )
     except LiteLLMGatewayError as exc:
         return (
-            _extract_entries(text),
+            deterministic_entries,
             "deterministic-ai-fallback",
             type(exc).__name__,
         )
@@ -1278,13 +1287,26 @@ def _extract_entries_with_ai(
 
     if not extracted:
         return (
-            _extract_entries(text),
+            deterministic_entries,
             "deterministic-ai-fallback",
             "no_valid_grounded_ai_entries",
         )
 
+    # AI extraction is additive. The model may identify a job title but omit
+    # nearby bullets, so it must never replace facts found deterministically.
+    merged = list(extracted)
+    seen = {
+        _entry_key(entry["entry_type"], entry["label"])
+        for entry in merged
+    }
+    for entry in deterministic_entries:
+        key = _entry_key(entry["entry_type"], entry["label"])
+        if key not in seen:
+            merged.append(entry)
+            seen.add(key)
+
     return (
-        extracted,
+        merged,
         "litellm-grounded",
         None,
     )

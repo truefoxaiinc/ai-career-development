@@ -106,6 +106,15 @@ const capabilities = [
     },
 ];
 
+const featureColors = [
+    'feature-indigo',
+    'feature-blue',
+    'feature-cyan',
+    'feature-violet',
+    'feature-green',
+    'feature-amber',
+];
+
 const plans = [
     {
         name: 'Free',
@@ -170,7 +179,7 @@ export default function Home() {
                         className="flex items-center gap-2.5"
                         aria-label="CareerPilot home"
                     >
-                        <div className="flex size-8 items-center justify-center rounded-[10px] bg-text-primary text-canvas">
+                        <div className="career-primary-button flex size-8 items-center justify-center rounded-[10px] text-white">
                             <Sparkles size={15} strokeWidth={2} />
                         </div>
 
@@ -218,7 +227,7 @@ export default function Home() {
 
                         <Link
                             href="/signup"
-                            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-text-primary px-4 text-13 font-medium text-canvas transition duration-200 hover:opacity-90 active:scale-[0.98]"
+                            className="career-primary-button inline-flex h-9 items-center gap-2 rounded-[10px] px-4 text-13 font-medium text-white transition duration-200 hover:-translate-y-0.5 active:scale-[0.98]"
                         >
                             Get started
                             <ArrowRight size={14} />
@@ -241,7 +250,7 @@ export default function Home() {
 
                         <h1 className="max-w-[680px] font-display text-[48px] font-medium leading-[0.98] tracking-[-0.05em] sm:text-[62px] lg:text-[72px]">
                             Your next job,
-                            <span className="block text-text-secondary">
+                            <span className="career-gradient-text block">
                                 built from what you&apos;ve actually done.
                             </span>
                         </h1>
@@ -255,7 +264,7 @@ export default function Home() {
                         <div className="mt-9 flex flex-col gap-3 sm:flex-row">
                             <Link
                                 href="/onboarding"
-                                className="group inline-flex h-12 items-center justify-center gap-2 rounded-[12px] bg-accent px-5 text-14 font-medium text-white shadow-[0_8px_30px_rgba(0,0,0,.12)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_35px_rgba(0,0,0,.16)] active:translate-y-0"
+                                className="career-primary-button group inline-flex h-12 items-center justify-center gap-2 rounded-[12px] px-5 text-14 font-medium transition duration-200 hover:-translate-y-0.5 active:translate-y-0"
                             >
                                 Upload your CV
                                 <ArrowRight
@@ -293,9 +302,9 @@ export default function Home() {
                     {/* Product Preview */}
                     <div className="animate-enter-delay lg:col-span-7">
                         <div className="relative lg:pl-8">
-                            <div className="absolute -inset-8 rounded-[40px] bg-accent/5 blur-3xl" />
+                            <div className="absolute -inset-10 rounded-[40px] bg-gradient-to-br from-accent/20 via-blue/10 to-cyan/10 blur-3xl" />
 
-                            <div className="relative overflow-hidden rounded-[22px] border border-border bg-canvas shadow-[0_30px_100px_rgba(0,0,0,.12)]">
+                            <div className="relative overflow-hidden rounded-[22px] border border-accent/20 bg-canvas shadow-[0_30px_100px_rgba(var(--accent-rgb),.16)]">
                                 {/* browser header */}
                                 <div className="flex h-12 items-center border-b border-border bg-surface-2/60 px-4">
                                     <div className="flex gap-1.5">
@@ -339,7 +348,7 @@ export default function Home() {
                                                 <div
                                                     key={label as string}
                                                     className={`mb-1 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[11px] ${index === 1
-                                                            ? 'bg-text-primary text-canvas'
+                                                            ? 'bg-accent text-white shadow-[0_8px_24px_rgba(var(--accent-rgb),.22)]'
                                                             : 'text-text-secondary'
                                                         }`}
                                                 >
@@ -446,7 +455,8 @@ export default function Home() {
                         ['Interview', 'Prepared from real evidence'],
                     ].map(([title, copy]) => (
                         <div key={title} className="py-5 md:px-6 first:md:pl-0">
-                            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-text-secondary">
+                            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.08em] text-text-secondary">
+                                <span className="size-1.5 rounded-full bg-accent shadow-[0_0_12px_rgba(var(--accent-rgb),.65)]" />
                                 {title}
                             </div>
                             <div className="mt-1.5 text-13 font-medium">{copy}</div>
@@ -473,7 +483,7 @@ export default function Home() {
                             className="product-card group rounded-[18px] border border-border bg-canvas p-6 transition duration-300 hover:-translate-y-1 hover:border-border-strong hover:shadow-[0_18px_50px_rgba(0,0,0,.06)]"
                         >
                             <div className="flex items-start justify-between">
-                                <div className="flex size-10 items-center justify-center rounded-[11px] border border-border bg-surface-2">
+                                <div className={`flex size-10 items-center justify-center rounded-[11px] border ${featureColors[index]}`}>
                                     <Icon size={17} strokeWidth={1.6} />
                                 </div>
 
@@ -511,7 +521,7 @@ export default function Home() {
                         copy="CareerPilot keeps the same career evidence connected from discovery through interview, so you do not start from scratch every time."
                     />
 
-                    <div className="mt-12 overflow-hidden rounded-[20px] border border-border bg-canvas">
+                    <div className="mt-12 overflow-hidden rounded-[20px] border border-border bg-canvas shadow-[0_24px_80px_rgba(var(--accent-rgb),.07)]">
                         <div className="grid md:grid-cols-2 lg:grid-cols-3">
                             {journey.map(({ number, title, copy, icon: Icon }, index) => (
                                 <div
@@ -525,11 +535,9 @@ export default function Home() {
                                             {number}
                                         </span>
 
-                                        <Icon
-                                            size={18}
-                                            strokeWidth={1.5}
-                                            className="text-text-secondary transition duration-300 group-hover:text-text-primary"
-                                        />
+                                        <span className={`flex size-9 items-center justify-center rounded-[10px] border ${featureColors[index]}`}>
+                                            <Icon size={17} strokeWidth={1.6} />
+                                        </span>
                                     </div>
 
                                     <div className="mt-16">
@@ -822,7 +830,7 @@ export default function Home() {
 
             {/* final CTA */}
             <section className="relative z-10 px-5 py-24 md:px-8 md:py-32">
-                <div className="mx-auto max-w-7xl overflow-hidden rounded-[28px] bg-accent px-6 py-16 text-white md:px-12 md:py-20">
+                <div className="career-final-cta mx-auto max-w-7xl rounded-[28px] px-6 py-16 text-white md:px-12 md:py-20">
                     <div className="relative">
                         <div className="pointer-events-none absolute -right-20 -top-40 size-[400px] rounded-full border border-white/10" />
                         <div className="pointer-events-none absolute -right-5 -top-24 size-[260px] rounded-full border border-white/10" />

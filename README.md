@@ -61,7 +61,7 @@ docker compose --env-file .env.docker down
 
 ## Production Docker deployment
 
-The production stack is separate from local development and requires real secrets, public frontend/API URLs, SMTP, AI-provider configuration, AWS RDS for PostgreSQL, and an externally managed S3-compatible bucket. It includes authenticated Redis with persistence, the API, a database-backed worker, and the Next.js frontend. Put the production environment file in a secret-managed deployment environment; do not commit it.
+The production stack is separate from local development and requires real secrets, public frontend/API URLs, SMTP, AI-provider configuration, and PostgreSQL. It includes authenticated Redis with persistence, the API, a database-backed worker, and the Next.js frontend. Put the production environment file in a secret-managed deployment environment; do not commit it.
 
 ```bash
 copy .env.production.example .env.production
@@ -69,9 +69,9 @@ copy .env.production.example .env.production
 docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
 ```
 
-The frontend and API bind to loopback only. Terminate TLS with a host reverse proxy or load balancer and forward traffic to `127.0.0.1:3000` and `127.0.0.1:8000`. The database and Redis are isolated on an internal Docker network and are not published to the host.
+The frontend and API bind to loopback only. For this deployment, keep `FRONTEND_PORT=13000` and `API_PORT=18000`; terminate TLS with the existing host reverse proxy or load balancer and forward traffic to `127.0.0.1:13000` and `127.0.0.1:18000`. The database and Redis are isolated on an internal Docker network and are not published to the host.
 
-Before the first deployment, create the S3 bucket, grant its application identity access only to that bucket, enable bucket encryption/versioning, and configure lifecycle retention. Back up PostgreSQL and test restoration regularly; Docker volumes are persistent storage, not backups.
+S3-compatible object storage is recommended for horizontally scaled deployments. A single-host deployment may instead set `STORAGE_BACKEND=local`, `ALLOW_LOCAL_STORAGE_IN_PRODUCTION=true`, and `LOCAL_STORAGE_DIR=/app/.careerpilot-storage`. The API and worker share the persistent `backend-storage` volume. This volume survives container recreation and image upgrades, but it is not a backup: arrange encrypted off-host backups and test restoration. Never use `docker compose down --volumes` for routine deployment or rollback.
 
 For RDS, use PostgreSQL with the `vector` extension available and set these values in `.env.production`:
 
@@ -103,7 +103,7 @@ docker compose --env-file .env.production -f docker-compose.production.yml down
 
 Authenticated candidates can open `/dashboard/resume-studio` to upload versioned PDF/DOCX resumes, review unverified extracted facts, request grounded AI suggestions, target a saved or pasted job, generate resume and cover-letter drafts, choose an ATS/Modern/Minimal/Professional template, approve claim-safe versions, and export PDF or DOCX.
 
-Uploads are content-validated and stored under private per-candidate object keys. `UPLOAD_MAX_BYTES` controls the upload limit. Production uses the configured private S3/MinIO bucket; storage keys are never returned by the API. Extraction, suggestions, and generation use the existing task worker. Database workers claim PostgreSQL tasks with `FOR UPDATE SKIP LOCKED`.
+Uploads are content-validated and stored under private per-candidate object keys. `UPLOAD_MAX_BYTES` controls the upload limit. Production uses either the recommended private S3-compatible bucket or the explicitly enabled private local volume; storage keys are never returned by the API. Local storage is appropriate only for a single host because multiple hosts do not share its filesystem. Extraction, suggestions, and generation use the existing task worker. Database workers claim PostgreSQL tasks with `FOR UPDATE SKIP LOCKED`.
 
 Apply database migrations before deploying a separately managed API process:
 
