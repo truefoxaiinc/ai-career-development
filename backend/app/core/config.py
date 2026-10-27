@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     oidc_jwks_uri: str | None = None
     oidc_redirect_uri: str | None = None
 
+    careerpilot_email_provider: Literal["smtp", "microsoft_graph"] = "smtp"
+    careerpilot_graph_tenant_id: str | None = None
+    careerpilot_graph_client_id: str | None = None
+    careerpilot_graph_client_secret: str | None = None
+    careerpilot_graph_sender: str | None = None
+
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -391,18 +397,17 @@ class Settings(BaseSettings):
                 "OIDC configuration is incomplete"
             )
 
-        if (
-            self.auth_mode == "local"
-            and not (
-                self.smtp_host
-                and self.smtp_from_email
-            )
-        ):
-            raise RuntimeError(
-                "Local authentication in "
-                "production requires SMTP_HOST "
-                "and SMTP_FROM_EMAIL"
-            )
+        if self.auth_mode == "local":
+            if self.careerpilot_email_provider == "microsoft_graph":
+                if not all((
+                    self.careerpilot_graph_tenant_id,
+                    self.careerpilot_graph_client_id,
+                    self.careerpilot_graph_client_secret,
+                    self.careerpilot_graph_sender or self.smtp_from_email,
+                )):
+                    raise RuntimeError("Microsoft Graph transactional email configuration is incomplete")
+            elif not (self.smtp_host and self.smtp_from_email):
+                raise RuntimeError("Local authentication in production requires SMTP_HOST and SMTP_FROM_EMAIL")
 
         if self.storage_backend == "local":
             if not self.allow_local_storage_in_production:

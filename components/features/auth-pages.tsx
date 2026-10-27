@@ -761,6 +761,9 @@ export function VerifyEmailPage() {
   const router = useRouter();
 
   const [token, setToken] = useState(search.get('token') || '');
+  const [resendEmail, setResendEmail] = useState('');
+  const [resendMessage, setResendMessage] = useState('');
+  const [resendBusy, setResendBusy] = useState(false);
 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -832,6 +835,39 @@ export function VerifyEmailPage() {
         <PrimaryAuthButton busy={busy}>
           {busy ? 'Verifying…' : 'Verify email'}
         </PrimaryAuthButton>
+      </form>
+      <form
+        className="mt-6 space-y-3"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setResendBusy(true);
+          setError('');
+          setResendMessage('');
+          try {
+            await api.post('/auth/resend-verification', { email: resendEmail });
+            setResendMessage('If verification is required, a new email will be sent.');
+          } catch (err) {
+            setError(errorMessage(err));
+          } finally {
+            setResendBusy(false);
+          }
+        }}
+      >
+        <label className="block text-12 font-medium" htmlFor="resend-verification-email">Didn't receive an email?</label>
+        <Input
+          id="resend-verification-email"
+          type="email"
+          required
+          autoComplete="email"
+          value={resendEmail}
+          onChange={(e) => setResendEmail(e.target.value)}
+          placeholder="Email address"
+          disabled={resendBusy}
+        />
+        <button type="submit" disabled={resendBusy} className="text-12 font-semibold text-indigo-400 disabled:opacity-60">
+          {resendBusy ? 'Sending…' : 'Resend verification email'}
+        </button>
+        {resendMessage && <p role="status" className="text-11 text-text-secondary">{resendMessage}</p>}
       </form>
     </AuthShell>
   );
