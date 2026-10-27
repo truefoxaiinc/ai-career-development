@@ -106,24 +106,26 @@ def register(db: Session, payload: RegisterRequest, settings: Settings) -> tuple
         encoded = hash_password(payload.password)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    user = User(email=email, password_hash=encoded, role="candidate")
+    user = User(email=email, password_hash=encoded, role="candidate",
+                is_email_verified=not settings.careerpilot_require_email_verification)
     db.add(user)
     db.flush()
     db.add(Candidate(user_id=user.id, name=payload.name.strip()))
     for purpose in ("terms", "privacy"):
         db.add(ConsentRecord(user_id=user.id, purpose=purpose, policy_version="2026-08", granted=True, metadata_json={"source": "signup"}))
     db.add(AuditLog(user_id=user.id, action="account.registered", resource_type="user", resource_id=str(user.id), metadata_json={}))
-    token = issue_email_token(db, user, "verify_email", 24 * 60)
+    token = issue_email_token(db, user, "verify_email", 24 * 60) if settings.careerpilot_require_email_verification else None
     db.commit()
-    _send_account_email(settings, user.email, "Verify your CareerPilot email", f"Verify your email: {settings.frontend_url.rstrip(chr(47))}/verify-email?token={token}")
-    return user, token if settings.environment in {"development", "test"} else None
+    if token:
+        _send_account_email(settings, user.email, "Verify your CareerPilot email", f"Verify your email: {settings.frontend_url.rstrip(chr(47))}/verify-email?token={token}")
+    return user, token if token and settings.environment in {"development", "test"} else None
 
 
 
 def resend_verification(db: Session, email: str, settings: Settings) -> None:
     """Unknown/verified addresses receive the same response; throttle by last issued token."""
     user = db.scalar(select(User).where(User.email == email.lower().strip()))
-    if not user or not user.is_active or user.is_email_verified:
+    if not settings.careerpilot_require_email_verification or not user or not user.is_active or user.is_email_verified:
         return
     latest = db.scalar(
         select(EmailToken)
