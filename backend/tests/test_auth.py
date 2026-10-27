@@ -152,3 +152,47 @@ def test_graph_email_sender_success_and_failure(monkeypatch):
         _send_account_email(settings, "receiver@example.com", "Subject", "Body")
     assert exc.value.status_code == 503
     assert "fake-secret" not in exc.value.detail
+
+
+def test_staging_can_skip_email_verification(client, monkeypatch):
+    from app.core.config import get_settings
+    from app.domains.auth import service
+    settings = get_settings()
+    monkeypatch.setattr(settings, "careerpilot_require_email_verification", False)
+    sent = []
+    monkeypatch.setattr(service, "_send_account_email", lambda *args: sent.append(args))
+    payload = {"email": "staging@example.com", "password": "StrongPass123!",
+               "name": "Staging Candidate", "accept_terms": True, "accept_privacy": True}
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 201
+    assert response.json()["data"]["email_verification_required"] is False
+    assert response.json()["data"]["dev_verification_token"] is None
+    assert response.json()["data"]["user"]["is_email_verified"] is True
+    assert sent == []
+    login = client.post("/api/v1/auth/login", json={"email": payload["email"], "password": payload["password"]})
+    assert login.status_code == 200
+    assert login.json()["data"]["email_verification_required"] is False
+    assert client.get("/api/v1/auth/session").status_code == 200
+    assert client.post("/api/v1/auth/resend-verification", json={"email": payload["email"]}).status_code == 202
+    assert sent == []
+
+
+def test_staging_existing_unverified_user_can_login(client, monkeypatch):
+    from app.core.config import get_settings
+    response = client.post("/api/v1/auth/register", json={
+        "email": "existing@example.com", "password": "StrongPass123!",
+        "name": "Existing Candidate", "accept_terms": True, "accept_privacy": True})
+    assert response.status_code == 201
+    monkeypatch.setattr(get_settings(), "careerpilot_require_email_verification", False)
+    login = client.post("/api/v1/auth/login", json={
+        "email": "existing@example.com", "password": "StrongPass123!"})
+    assert login.status_code == 200
+    assert login.json()["data"]["email_verification_required"] is False
+    assert client.get("/api/v1/auth/session").status_code == 200
+
+
+def test_production_rejects_email_verification_bypass():
+    import pytest
+    from app.core.config import Settings
+    with pytest.raises(RuntimeError, match="bypass is not allowed in production"):
+        Settings(environment="production", careerpilot_require_email_verification=False).validate_runtime()
