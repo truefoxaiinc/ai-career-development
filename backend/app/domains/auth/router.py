@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.security import clear_auth_cookies, get_current_user, set_auth_cookies
 from app.models.entities import User
 from app.schemas.common import success
-from .schemas import ChangePasswordRequest, ForgotPasswordRequest, LoginRequest, RegisterRequest, ResetPasswordRequest, UserView, VerifyEmailRequest
+from .schemas import ChangePasswordRequest, ForgotPasswordRequest, LoginRequest, RegisterRequest, ResendVerificationRequest, ResetPasswordRequest, UserView, VerifyEmailRequest
 from .service import (
     authenticate,
     change_password,
@@ -20,6 +20,7 @@ from .service import (
     complete_oidc,
     issue_session,
     register,
+    resend_verification,
     request_password_reset,
     reset_password,
     revoke_refresh,
@@ -34,6 +35,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def register_endpoint(payload: RegisterRequest, response: Response, db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
     user, dev_token = register(db, payload, settings)
     return success({"user": UserView.model_validate(user).model_dump(mode="json"), "email_verification_required": True, "dev_verification_token": dev_token})
+
+
+@router.post("/resend-verification", status_code=202)
+def resend_verification_endpoint(payload: ResendVerificationRequest, db: Annotated[Session, Depends(get_db)], settings: Annotated[Settings, Depends(get_settings)]):
+    resend_verification(db, payload.email, settings)
+    return success({"message": "If verification is required, a new email will be sent."})
 
 
 @router.post("/login")
