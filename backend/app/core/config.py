@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     oidc_jwks_uri: str | None = None
     oidc_redirect_uri: str | None = None
 
+    careerpilot_require_email_verification: bool = True
     careerpilot_email_provider: Literal["smtp", "microsoft_graph"] = "smtp"
     careerpilot_graph_tenant_id: str | None = None
     careerpilot_graph_client_id: str | None = None
@@ -363,6 +364,9 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return
 
+        if not self.careerpilot_require_email_verification:
+            raise RuntimeError("Email verification bypass is not allowed in production")
+
         if (
             self.jwt_secret.startswith(
                 "development-only-change-me"
@@ -397,7 +401,7 @@ class Settings(BaseSettings):
                 "OIDC configuration is incomplete"
             )
 
-        if self.auth_mode == "local":
+        if self.auth_mode == "local" and self.careerpilot_require_email_verification:
             if self.careerpilot_email_provider == "microsoft_graph":
                 if not all((
                     self.careerpilot_graph_tenant_id,
