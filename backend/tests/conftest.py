@@ -6,6 +6,8 @@ from pathlib import Path
 TEST_DB = Path(__file__).parent / "careerpilot-test.db"
 TEST_STORAGE = Path(__file__).parent / ".storage"
 os.environ["ENVIRONMENT"] = "test"
+# HTTP TestClient does not send Secure cookies; isolate tests from production env.
+os.environ["COOKIE_SECURE"] = "false"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
 os.environ["LOCAL_STORAGE_DIR"] = str(TEST_STORAGE)
 os.environ["TASK_MODE"] = "inline"
