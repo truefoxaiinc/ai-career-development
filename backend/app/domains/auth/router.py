@@ -66,8 +66,8 @@ def logout_endpoint(response: Response, db: Annotated[Session, Depends(get_db)],
 
 
 @router.get("/session")
-def session_endpoint(user: Annotated[User, Depends(get_current_user)]):
-    return success({"user": UserView.model_validate(user).model_dump(mode="json")})
+def session_endpoint(user: Annotated[User, Depends(get_current_user)], settings: Annotated[Settings, Depends(get_settings)]):
+    return success({"user": UserView.model_validate(user).model_dump(mode="json"), "email_verification_required": settings.careerpilot_require_email_verification and not user.is_email_verified})
 
 
 @router.post("/change-password")

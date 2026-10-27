@@ -12,11 +12,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const session = useQuery({
     queryKey: ['session'],
-    queryFn: () => api.get<{ user: { is_email_verified: boolean } }>('/auth/session'),
+    queryFn: () => api.get<{ user: { is_email_verified: boolean }; email_verification_required: boolean }>('/auth/session'),
     retry: false,
   });
   const unauthenticated = session.error instanceof ApiError && session.error.status === 401;
-  const unverified = Boolean(session.data && !session.data.user.is_email_verified);
+  const unverified = Boolean(session.data?.email_verification_required);
 
   useEffect(() => {
     if (unauthenticated) {

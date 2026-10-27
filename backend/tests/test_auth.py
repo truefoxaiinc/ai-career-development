@@ -172,7 +172,9 @@ def test_staging_can_skip_email_verification(client, monkeypatch):
     login = client.post("/api/v1/auth/login", json={"email": payload["email"], "password": payload["password"]})
     assert login.status_code == 200
     assert login.json()["data"]["email_verification_required"] is False
-    assert client.get("/api/v1/auth/session").status_code == 200
+    session = client.get("/api/v1/auth/session")
+    assert session.status_code == 200
+    assert session.json()["data"]["email_verification_required"] is False
     assert client.post("/api/v1/auth/resend-verification", json={"email": payload["email"]}).status_code == 202
     assert sent == []
 
@@ -188,7 +190,10 @@ def test_staging_existing_unverified_user_can_login(client, monkeypatch):
         "email": "existing@example.com", "password": "StrongPass123!"})
     assert login.status_code == 200
     assert login.json()["data"]["email_verification_required"] is False
-    assert client.get("/api/v1/auth/session").status_code == 200
+    session = client.get("/api/v1/auth/session")
+    assert session.status_code == 200
+    assert session.json()["data"]["user"]["is_email_verified"] is False
+    assert session.json()["data"]["email_verification_required"] is False
 
 
 def test_production_rejects_email_verification_bypass():
@@ -196,3 +201,10 @@ def test_production_rejects_email_verification_bypass():
     from app.core.config import Settings
     with pytest.raises(RuntimeError, match="bypass is not allowed in production"):
         Settings(environment="production", careerpilot_require_email_verification=False).validate_runtime()
+
+
+def test_verified_session_does_not_require_email_verification(client):
+    register_verified(client)
+    session = client.get("/api/v1/auth/session")
+    assert session.status_code == 200
+    assert session.json()["data"]["email_verification_required"] is False
