@@ -8,6 +8,7 @@ import ssl
 import uuid
 from email.message import EmailMessage
 from datetime import UTC, datetime, timedelta
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -25,6 +26,9 @@ from .schemas import RegisterRequest
 def _send_account_email(settings: Settings, recipient: str, subject: str, text: str) -> None:
     if settings.environment in {"development", "test"}:
         return
+    if settings.careerpilot_email_provider == "microsoft_graph":
+        _send_graph_email(settings, recipient, subject, text)
+        return
     if not settings.smtp_host or not settings.smtp_from_email:
         raise HTTPException(status_code=503, detail="Transactional email is not configured")
     message = EmailMessage()
@@ -41,6 +45,40 @@ def _send_account_email(settings: Settings, recipient: str, subject: str, text: 
             server.send_message(message)
     except (OSError, smtplib.SMTPException) as exc:
         raise HTTPException(status_code=503, detail="Transactional email could not be delivered") from exc
+
+
+def _send_graph_email(settings: Settings, recipient: str, subject: str, body: str) -> None:
+    tenant = settings.careerpilot_graph_tenant_id
+    client_id = settings.careerpilot_graph_client_id
+    secret = settings.careerpilot_graph_client_secret
+    sender = settings.careerpilot_graph_sender or settings.smtp_from_email
+    if not all((tenant, client_id, secret, sender)):
+        raise HTTPException(status_code=503, detail="Transactional email is not configured")
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            token_response = client.post(
+                f"https://login.microsoftonline.com/{quote(tenant, safe='')}/oauth2/v2.0/token",
+                data={"client_id": client_id, "client_secret": secret,
+                      "scope": "https://graph.microsoft.com/.default",
+                      "grant_type": "client_credentials"},
+            )
+            token_response.raise_for_status()
+            access_token = token_response.json().get("access_token")
+            if not access_token:
+                raise ValueError("No access token")
+            response = client.post(
+                f"https://graph.microsoft.com/v1.0/users/{quote(sender, safe='')}/sendMail",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={"message": {
+                    "subject": subject,
+                    "body": {"contentType": "Text", "content": body},
+                    "toRecipients": [{"emailAddress": {"address": recipient}}],
+                }, "saveToSentItems": False},
+            )
+            response.raise_for_status()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Transactional email could not be delivered") from exc
+
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
@@ -79,6 +117,28 @@ def register(db: Session, payload: RegisterRequest, settings: Settings) -> tuple
     db.commit()
     _send_account_email(settings, user.email, "Verify your CareerPilot email", f"Verify your email: {settings.frontend_url.rstrip(chr(47))}/verify-email?token={token}")
     return user, token if settings.environment in {"development", "test"} else None
+
+
+
+def resend_verification(db: Session, email: str, settings: Settings) -> None:
+    """Unknown/verified addresses receive the same response; throttle by last issued token."""
+    user = db.scalar(select(User).where(User.email == email.lower().strip()))
+    if not user or not user.is_active or user.is_email_verified:
+        return
+    latest = db.scalar(
+        select(EmailToken)
+        .where(EmailToken.user_id == user.id, EmailToken.purpose == "verify_email")
+        .order_by(EmailToken.created_at.desc())
+        .limit(1)
+    )
+    if latest and _aware(latest.created_at) > datetime.now(UTC) - timedelta(minutes=2):
+        return
+    raw = issue_email_token(db, user, "verify_email", 24 * 60)
+    db.commit()
+    _send_account_email(
+        settings, user.email, "Verify your CareerPilot email",
+        f"Verify your email: {settings.frontend_url.rstrip('/')}/verify-email?token={raw}",
+    )
 
 
 def authenticate(db: Session, email: str, password: str) -> User:
