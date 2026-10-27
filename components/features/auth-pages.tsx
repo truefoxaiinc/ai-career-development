@@ -419,6 +419,14 @@ export function SignupPage() {
         accept_privacy: privacy,
       });
 
+      if (!out.email_verification_required) {
+        await api.post('/auth/login', { email: email.trim(), password });
+        push('Account created');
+        router.push('/onboarding');
+        router.refresh();
+        return;
+      }
+
       if (out.dev_verification_token) {
         await api.post('/auth/verify-email', {
           token: out.dev_verification_token,
