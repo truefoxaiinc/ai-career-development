@@ -114,8 +114,8 @@ def get_current_user(
     return user
 
 
-def require_verified_user(user: Annotated[User, Depends(get_current_user)]) -> User:
-    if not user.is_email_verified:
+def require_verified_user(user: Annotated[User, Depends(get_current_user)], settings: Annotated[Settings, Depends(get_settings)]) -> User:
+    if settings.careerpilot_require_email_verification and not user.is_email_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email verification required")
     return user
 
