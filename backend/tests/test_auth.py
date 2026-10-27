@@ -92,3 +92,63 @@ def test_registration_login_reset_and_session(client):
     reset = client.post("/api/v1/auth/reset-password", json={"token":token,"new_password":"ChangedPass123!"})
     assert reset.status_code == 200
     assert client.post("/api/v1/auth/login", json={"email":"candidate@example.com","password":"ChangedPass123!"}).status_code == 200
+
+def test_resend_verification_cooldown_and_unknown_account(client, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    from sqlalchemy import select
+    from app.core.database import SessionLocal
+    from app.models.entities import EmailToken, User
+    from app.domains.auth import service
+
+    sent = []
+    monkeypatch.setattr(service, "_send_account_email", lambda *args: sent.append(args))
+    payload = {"email": "retry@example.com", "password": "StrongPass123!",
+               "name": "Retry", "accept_terms": True, "accept_privacy": True}
+    assert client.post("/api/v1/auth/register", json=payload).status_code == 201
+    assert client.post("/api/v1/auth/resend-verification", json={"email": "unknown@example.com"}).status_code == 202
+    assert client.post("/api/v1/auth/resend-verification", json={"email": "retry@example.com"}).status_code == 202
+    assert len(sent) == 1  # registration email only; resend throttled
+
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.email == "retry@example.com"))
+        token = db.scalar(select(EmailToken).where(EmailToken.user_id == user.id))
+        token.created_at = datetime.now(UTC) - timedelta(minutes=3)
+        db.commit()
+
+    assert client.post("/api/v1/auth/resend-verification", json={"email": "retry@example.com"}).status_code == 202
+    assert len(sent) == 2
+    assert client.post("/api/v1/auth/resend-verification", json={"email": "retry@example.com"}).status_code == 202
+    assert len(sent) == 2
+
+
+def test_graph_email_sender_success_and_failure(monkeypatch):
+    import pytest
+    import httpx
+    from fastapi import HTTPException
+    from app.core.config import Settings
+    from app.domains.auth.service import _send_account_email
+
+    requests = []
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith("/token"):
+            return httpx.Response(200, json={"access_token": "fake-token"})
+        return httpx.Response(202)
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(transport=transport))
+    settings = Settings(environment="production", careerpilot_email_provider="microsoft_graph",
+        careerpilot_graph_tenant_id="tenant", careerpilot_graph_client_id="client",
+        careerpilot_graph_client_secret="fake-secret", careerpilot_graph_sender="sender@example.com")
+    _send_account_email(settings, "receiver@example.com", "Subject", "Body")
+    assert len(requests) == 2
+    assert requests[1].url.path.endswith("/users/sender@example.com/sendMail")
+    assert requests[1].headers["Authorization"] == "Bearer fake-token"
+
+    def reject(request):
+        return httpx.Response(403)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(reject)))
+    with pytest.raises(HTTPException) as exc:
+        _send_account_email(settings, "receiver@example.com", "Subject", "Body")
+    assert exc.value.status_code == 503
+    assert "fake-secret" not in exc.value.detail
